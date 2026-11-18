@@ -16,6 +16,7 @@ struct MacWheelTestsMain {
         registerTask1Tests(runner)
         registerTask2Tests(runner)
         registerTask3Tests(runner)
+        registerTask4Tests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -207,5 +208,46 @@ func registerTask3Tests(_ runner: TestSuiteRunner) {
         let newSize = (try FileManager.default.attributesOfItem(atPath: compressed.path)[.size] as? NSNumber)?.int64Value ?? 0
         try assertTrue(newSize > 0 && newSize < origSize, "Expected compressed PDF \(newSize) < original \(origSize)")
         try assertEqual(PDFDocument(url: compressed)?.pageCount ?? 0, 1)
+    }
+}
+
+
+func registerTask4Tests(_ runner: TestSuiteRunner) {
+    runner.test("Task4", "DocumentEngine converts Thai+English TXT to RTF, HTML, DOCX, PDF and back") {
+        let dir = try makeTempDirectory("Task4Docs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let txtURL = dir.appendingPathComponent("note.txt")
+        let sampleText = "สวัสดี MacWheel\nOffline document conversion test."
+        try sampleText.write(to: txtURL, atomically: true, encoding: .utf8)
+
+        let engine = DocumentEngine()
+        let tools = OutputPathResolver.discoverTools()
+
+        let rtfOut = try await engine.convertDocument(source: txtURL, to: .toRTF, toolPaths: tools)
+        try assertEqual(rtfOut.lastPathComponent, "note.rtf")
+        try assertTrue(FileManager.default.fileExists(atPath: rtfOut.path))
+
+        let htmlOut = try await engine.convertDocument(source: txtURL, to: .toHTML, toolPaths: tools)
+        try assertEqual(htmlOut.lastPathComponent, "note.html")
+        try assertTrue(FileManager.default.fileExists(atPath: htmlOut.path))
+
+        let docxOut = try await engine.convertDocument(source: txtURL, to: .toDOCX, toolPaths: tools)
+        try assertEqual(docxOut.lastPathComponent, "note.docx")
+        try assertTrue(FileManager.default.fileExists(atPath: docxOut.path))
+
+        let pdfOut = try await engine.convertDocument(source: txtURL, to: .toPDF, toolPaths: tools)
+        try assertEqual(pdfOut.lastPathComponent, "note.pdf")
+        try assertTrue((PDFDocument(url: pdfOut)?.pageCount ?? 0) >= 1)
+
+        let roundTripTXT = try await engine.convertDocument(source: docxOut, to: .toTXT, toolPaths: tools)
+        let extracted = try String(contentsOf: roundTripTXT, encoding: .utf8)
+        try assertTrue(extracted.contains("สวัสดี"))
+        try assertTrue(extracted.contains("MacWheel"))
+
+        let docxPDF = try await engine.convertDocument(source: docxOut, to: .toPDF, toolPaths: tools)
+        try assertEqual(docxPDF.lastPathComponent, "note (2).pdf")
+        let pdfExtracted = PDFDocument(url: docxPDF)?.string ?? ""
+        try assertTrue(pdfExtracted.contains("MacWheel"), "PDF text was: \(pdfExtracted)")
     }
 }
