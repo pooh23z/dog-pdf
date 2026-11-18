@@ -146,7 +146,7 @@ Verified on target Mac:
 - **PDF translation & scanned PDFs:** `→TH` / `→EN` on PDF/DOCX outputs a clean `<name> TH.txt` / `<name> EN.txt` (like the reference clip), and scanned PDFs automatically use offline Apple `Vision` OCR when no text layer exists.
 - **Multi-file & mixed-file drags:** Same-type drags run in batch; `Merge PDF` works on `2+ Images`, `2+ PDFs`, or `Images + PDFs`; other mixed drags show only actions supported by every dragged file (strict intersection).
 - **Whisper output:** `Transcribe` produces both `.txt` and `.srt` files beside the media file.
-- **Project location:** `/Users/ppooh/.gemini/antigravity/scratch/MacWheel`, packaged into `MacWheel.app` + `scripts/setup-deps.sh` for `whisper.cpp` & model download.
+- **Project location:** `/Users/ppooh/.gemini/antigravity/scratch/MacWheel`, packaged into `dist/โปรเเกรมฉันเอง.app` (display name `โปรเเกรมฉันเอง`) + `scripts/setup-deps.sh` for `whisper.cpp` & model download.
 
 ### Left to the Builder
 - Exact visual styling constants (slice geometry, spring animations, glassmorphism colors, SF Symbols).
