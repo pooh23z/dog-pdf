@@ -15,6 +15,7 @@ struct MacWheelTestsMain {
         let runner = TestSuiteRunner()
         registerTask1Tests(runner)
         registerTask2Tests(runner)
+        registerTask3Tests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -137,5 +138,74 @@ func registerTask2Tests(_ runner: TestSuiteRunner) {
         try assertEqual(merged.lastPathComponent, "1_img Merged.pdf")
         let doc = PDFDocument(url: merged)
         try assertEqual(doc?.pageCount ?? 0, 3)
+    }
+}
+
+
+func registerTask3Tests(_ runner: TestSuiteRunner) {
+    runner.test("Task3", "PDFEngine exports 2-page PDF to PNG folder and TXT") {
+        let dir = try makeTempDirectory("Task3Export")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let pdfURL = dir.appendingPathComponent("text_sample.pdf")
+        try TestFixtures.createTextPDF(at: pdfURL, pages: ["Hello Page One", "Second Page Content"])
+
+        let engine = PDFEngine()
+        let pagesDir = try await engine.exportPagesAsImages(pdfURL: pdfURL, format: .toPNG)
+        try assertEqual(pagesDir.lastPathComponent, "text_sample_pages")
+        let files = try FileManager.default.contentsOfDirectory(atPath: pagesDir.path)
+        try assertEqual(files.filter { $0.hasSuffix(".png") }.count, 2)
+
+        let txtURL = try await engine.exportPDFToTXT(pdfURL: pdfURL)
+        try assertEqual(txtURL.lastPathComponent, "text_sample.txt")
+        let txt = try String(contentsOf: txtURL, encoding: .utf8)
+        try assertTrue(txt.contains("Hello Page One"))
+        try assertTrue(txt.contains("Second Page Content"))
+
+        let docxURL = try await engine.exportPDFToDOCX(pdfURL: pdfURL)
+        try assertEqual(docxURL.lastPathComponent, "text_sample.docx")
+        try assertTrue(FileManager.default.fileExists(atPath: docxURL.path))
+    }
+
+    runner.test("Task3", "PDFEngine runs Vision OCR on scanned image-only PDF") {
+        let dir = try makeTempDirectory("Task3OCR")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scannedURL = dir.appendingPathComponent("scanned_sample.pdf")
+        try TestFixtures.createScannedImagePDF(at: scannedURL, text: "MacWheel Offline OCR Test")
+        try assertEqual(PDFDocument(url: scannedURL)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "", "")
+
+        let engine = PDFEngine()
+        let extracted = try await engine.extractTextOrOCR(pdfURL: scannedURL)
+        try assertTrue(extracted.range(of: "MacWheel", options: .caseInsensitive) != nil, "OCR output was: \(extracted)")
+    }
+
+    runner.test("Task3", "PDFEngine rejects zero-byte PDF with WheelError.invalidFile") {
+        let dir = try makeTempDirectory("Task3Broken")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let brokenURL = dir.appendingPathComponent("broken.pdf")
+        try Data().write(to: brokenURL)
+
+        let engine = PDFEngine()
+        try await assertThrowsAsync(WheelError.invalidFile("Invalid or unreadable PDF: broken.pdf")) {
+            _ = try await engine.extractTextOrOCR(pdfURL: brokenURL)
+        }
+    }
+
+    runner.test("Task3", "PDFEngine compresses large image PDF smaller") {
+        let dir = try makeTempDirectory("Task3Compress")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let imgURL = dir.appendingPathComponent("huge.png")
+        try TestFixtures.createTestImage(at: imgURL, width: 2800, height: 1800, utType: .png, noisy: true)
+        let pdfURL = try await ImageEngine().convertImage(source: imgURL, to: .toPDF, preset: .balanced, toolPaths: OutputPathResolver.discoverTools())
+        let origSize = (try FileManager.default.attributesOfItem(atPath: pdfURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+
+        let compressed = try await PDFEngine().compressPDF(pdfURL: pdfURL, preset: .small)
+        try assertEqual(compressed.lastPathComponent, "huge (compressed).pdf")
+        let newSize = (try FileManager.default.attributesOfItem(atPath: compressed.path)[.size] as? NSNumber)?.int64Value ?? 0
+        try assertTrue(newSize > 0 && newSize < origSize, "Expected compressed PDF \(newSize) < original \(origSize)")
+        try assertEqual(PDFDocument(url: compressed)?.pageCount ?? 0, 1)
     }
 }

@@ -75,4 +75,46 @@ enum TestFixtures {
         }
         ctx.closePDF()
     }
+
+    static func createScannedImagePDF(at url: URL, text: String) throws {
+        let width = 1200
+        let height = 600
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw TestFailure(message: "Failed to create bitmap context for scanned PDF")
+        }
+        ctx.setFillColor(CGColor.white)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        let nsContext = NSGraphicsContext(cgContext: ctx, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = nsContext
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 48),
+            .foregroundColor: NSColor.black
+        ]
+        NSString(string: text).draw(in: CGRect(x: 60, y: 240, width: 1080, height: 120), withAttributes: attrs)
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let cgImage = ctx.makeImage() else {
+            throw TestFailure(message: "Failed to render scanned page bitmap")
+        }
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+        let pdf = PDFDocument()
+        guard let page = PDFPage(image: nsImage) else {
+            throw TestFailure(message: "Failed to create PDFPage from bitmap")
+        }
+        pdf.insert(page, at: 0)
+        if !pdf.write(to: url) {
+            throw TestFailure(message: "Failed to write scanned PDF")
+        }
+    }
 }
