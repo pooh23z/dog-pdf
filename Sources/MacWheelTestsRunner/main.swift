@@ -17,6 +17,7 @@ struct MacWheelTestsMain {
         registerTask2Tests(runner)
         registerTask3Tests(runner)
         registerTask4Tests(runner)
+        registerTask5Tests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -249,5 +250,113 @@ func registerTask4Tests(_ runner: TestSuiteRunner) {
         try assertEqual(docxPDF.lastPathComponent, "note (2).pdf")
         let pdfExtracted = PDFDocument(url: docxPDF)?.string ?? ""
         try assertTrue(pdfExtracted.contains("MacWheel"), "PDF text was: \(pdfExtracted)")
+    }
+}
+
+
+private actor StubWhisperRunner: ProcessExecuting {
+    private let realRunner = ProcessRunner()
+    private(set) var recordedCommands: [(String, [String])] = []
+
+    func run(executableURL: URL, arguments: [String]) async throws -> ProcessResult {
+        recordedCommands.append((executableURL.lastPathComponent, arguments))
+
+        if executableURL.lastPathComponent == "whisper-cli" {
+            if let ofIdx = arguments.firstIndex(of: "-of"), ofIdx + 1 < arguments.count {
+                let base = arguments[ofIdx + 1]
+                try "Hello transcribed text".write(toFile: base + ".txt", atomically: true, encoding: .utf8)
+                try "1\n00:00:00,000 --> 00:00:01,500\nHello transcribed text\n".write(toFile: base + ".srt", atomically: true, encoding: .utf8)
+            }
+            return ProcessResult(exitCode: 0, stdout: "", stderr: "")
+        }
+        return try await realRunner.run(executableURL: executableURL, arguments: arguments)
+    }
+
+    func hasWhisperCallWithTxtAndSrt() -> Bool {
+        recordedCommands.contains { name, args in
+            name == "whisper-cli" && args.contains("-otxt") && args.contains("-osrt")
+        }
+    }
+}
+
+func registerTask5Tests(_ runner: TestSuiteRunner) {
+    runner.test("Task5", "MediaEngine converts and compresses real MOV via ffmpeg") {
+        let dir = try makeTempDirectory("Task5Media")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let tools = OutputPathResolver.discoverTools()
+        guard let ffmpeg = tools.ffmpeg else {
+            throw TestFailure(message: "ffmpeg must be installed on this Mac")
+        }
+
+        let movURL = dir.appendingPathComponent("sample.mov")
+        let gen = try await ProcessRunner().run(
+            executableURL: ffmpeg,
+            arguments: [
+                "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=24:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "h264_videotoolbox", "-c:a", "aac", movURL.path
+            ]
+        )
+        try assertEqual(gen.exitCode, 0, "ffmpeg fixture creation failed: \(gen.stderr)")
+
+        let engine = MediaEngine()
+        for (action, ext) in [
+            (WheelAction.toMP4, "mp4"),
+            (WheelAction.toMP3, "mp3"),
+            (WheelAction.toM4A, "m4a"),
+            (WheelAction.toGIF, "gif")
+        ] {
+            let out = try await engine.convertOrCompressMedia(source: movURL, action: action, preset: .balanced, toolPaths: tools)
+            try assertEqual(out.pathExtension.lowercased(), ext)
+            let size = (try FileManager.default.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+            try assertTrue(size > 0, "Empty output for \(action.label)")
+        }
+
+        let compressed = try await engine.convertOrCompressMedia(source: movURL, action: .compress, preset: .balanced, toolPaths: tools)
+        try assertEqual(compressed.lastPathComponent, "sample (compressed).mp4")
+        try assertTrue(FileManager.default.fileExists(atPath: compressed.path))
+    }
+
+    runner.test("Task5", "MediaEngine transcribes via whisper-cli, cleans temp wav, and errors when missing") {
+        let dir = try makeTempDirectory("Task5Whisper")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let realTools = OutputPathResolver.discoverTools()
+        guard let ffmpeg = realTools.ffmpeg else {
+            throw TestFailure(message: "ffmpeg missing")
+        }
+
+        let movURL = dir.appendingPathComponent("talk.mov")
+        _ = try await ProcessRunner().run(
+            executableURL: ffmpeg,
+            arguments: ["-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15:duration=1", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", movURL.path]
+        )
+
+        let fakeWhisper = dir.appendingPathComponent("whisper-cli")
+        let fakeModel = dir.appendingPathComponent("ggml-medium.bin")
+        try Data("#!/bin/sh\n".utf8).write(to: fakeWhisper)
+        try Data("model".utf8).write(to: fakeModel)
+
+        let stubTools = ToolPaths(ffmpeg: ffmpeg, magick: realTools.magick, whisperCLI: fakeWhisper, soffice: nil, pandoc: nil, whisperModelURL: fakeModel)
+        let stubRunner = StubWhisperRunner()
+        let engine = MediaEngine(runner: stubRunner)
+
+        let res = try await engine.transcribeMedia(source: movURL, language: "auto", toolPaths: stubTools)
+        try assertEqual(res.txtURL.lastPathComponent, "talk.txt")
+        try assertEqual(res.srtURL.lastPathComponent, "talk.srt")
+        try assertTrue(FileManager.default.fileExists(atPath: res.txtURL.path))
+        try assertTrue(FileManager.default.fileExists(atPath: res.srtURL.path))
+
+        let hasCall = await stubRunner.hasWhisperCallWithTxtAndSrt()
+        try assertTrue(hasCall)
+
+        let dirContents = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        try assertTrue(!dirContents.contains(where: { $0.hasSuffix(".wav") }), "Temp wav was not cleaned up")
+
+        let missingTools = ToolPaths(ffmpeg: ffmpeg, magick: nil, whisperCLI: nil, soffice: nil, pandoc: nil, whisperModelURL: nil)
+        try await assertThrowsAsync(WheelError.missingDependency("whisper-cli is not installed. Run Setup Dependencies from the menu bar.")) {
+            _ = try await engine.transcribeMedia(source: movURL, language: "auto", toolPaths: missingTools)
+        }
     }
 }
