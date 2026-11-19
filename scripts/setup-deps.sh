@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
 MODEL_SIZE="${1:-medium}"
 MODELS_DIR="${HOME}/Library/Application Support/MacWheel/Models"
 mkdir -p "${MODELS_DIR}"
@@ -12,12 +14,16 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v whisper-cli >/dev/null 2>&1; then
-  echo "▶ กำลังติดตั้ง whisper.cpp (สำหรับถอดเสียงออฟไลน์)..."
-  brew install whisper-cpp
-else
-  echo "✅ พบ whisper-cli แล้ว: $(command -v whisper-cli)"
-fi
+for pkg_cmd in "ffmpeg:ffmpeg" "magick:imagemagick" "whisper-cli:whisper-cpp"; do
+  cmd="${pkg_cmd%%:*}"
+  pkg="${pkg_cmd##*:}"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "▶ กำลังติดตั้ง ${pkg}..."
+    brew install "${pkg}"
+  else
+    echo "✅ พบ ${cmd} แล้ว: $(command -v "${cmd}")"
+  fi
+done
 
 if [[ "${MODEL_SIZE}" == "--small" || "${MODEL_SIZE}" == "small" ]]; then
   MODEL_FILE="ggml-small.bin"
@@ -37,4 +43,4 @@ else
 fi
 
 echo ""
-echo "🎉 พร้อมใช้งานถอดเสียงออฟไลน์ (ไทย/อังกฤษ) 100% แล้ว! กด 'รีเฟรชสถานะ' ใน Menu Bar ได้เลย"
+echo "🎉 เครื่องมือทั้งหมดพร้อมใช้งานแบบออฟไลน์ 100% แล้ว! กด 'รีเฟรชสถานะ' ใน Dog PDF ได้เลย"

@@ -140,9 +140,10 @@ final class AppState: ObservableObject {
     func launchSetupDepsScript() {
         var scriptURL = Bundle.main.resourceURL?.appendingPathComponent("setup-deps.sh")
         if scriptURL == nil || !FileManager.default.fileExists(atPath: scriptURL!.path) {
-            let fallback = URL(fileURLWithPath: "/Users/ppooh/.gemini/antigravity/scratch/MacWheel/scripts/setup-deps.sh")
-            if FileManager.default.fileExists(atPath: fallback.path) {
-                scriptURL = fallback
+            let localScript = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("scripts/setup-deps.sh")
+            if FileManager.default.fileExists(atPath: localScript.path) {
+                scriptURL = localScript
             }
         }
         guard let script = scriptURL, FileManager.default.fileExists(atPath: script.path) else {
