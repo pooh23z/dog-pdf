@@ -23,6 +23,7 @@ struct MacWheelTestsMain {
         registerTask7Tests(runner)
         registerFinalFixTests(runner)
         registerMainWindowTests(runner)
+        registerBrandingTests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -641,5 +642,15 @@ func registerMainWindowTests(_ runner: TestSuiteRunner) {
         let encoded = try JSONEncoder().encode(custom)
         let decodedCustom = try JSONDecoder().decode(AppSettings.self, from: encoded)
         try assertTrue(!decodedCustom.showMainWindowOnLaunch)
+    }
+}
+
+
+func registerBrandingTests(_ runner: TestSuiteRunner) {
+    runner.test("Branding", "AppBranding exposes Dog PDF display name, bundle identifier, and dog.fill menu bar icon") {
+        try assertEqual(AppBranding.displayName, "Dog PDF")
+        try assertEqual(AppBranding.bundleIdentifier, "com.personal.dogpdf")
+        try assertEqual(AppBranding.menuBarSymbolName, "dog.fill")
+        try assertTrue(NSImage(systemSymbolName: AppBranding.menuBarSymbolName, accessibilityDescription: nil) != nil)
     }
 }

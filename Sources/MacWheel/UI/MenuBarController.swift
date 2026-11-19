@@ -167,10 +167,11 @@ final class MenuBarController: NSObject {
         super.init()
 
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "circle.hexagongrid.fill", accessibilityDescription: "โปรเเกรมฉันเอง")
+            let image = NSImage(systemSymbolName: AppBranding.menuBarSymbolName, accessibilityDescription: AppBranding.displayName)
+                ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: AppBranding.displayName)
             image?.isTemplate = true
             button.image = image
-            button.toolTip = "โปรเเกรมฉันเอง (Offline File Wheel)"
+            button.toolTip = "\(AppBranding.displayName) (Offline File Converter)"
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
@@ -235,11 +236,19 @@ struct AppControlView: View {
 
     private var headerSection: some View {
         HStack {
-            Image(systemName: "circle.hexagongrid.fill")
-                .font(.title2)
-                .foregroundStyle(.orange)
+            if let appIcon = NSApp.applicationIconImage {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: AppBranding.menuBarSymbolName)
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+            }
             VStack(alignment: .leading, spacing: 1) {
-                Text("โปรเเกรมฉันเอง")
+                Text(AppBranding.displayName)
                     .font(.headline)
                 Text("100% Offline • ลากไฟล์ + กด \(state.settings.trigger.displayName)")
                     .font(.caption)

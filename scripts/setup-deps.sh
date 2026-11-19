@@ -5,7 +5,7 @@ MODEL_SIZE="${1:-medium}"
 MODELS_DIR="${HOME}/Library/Application Support/MacWheel/Models"
 mkdir -p "${MODELS_DIR}"
 
-echo "=== ตั้งค่าเครื่องมือออฟไลน์สำหรับ โปรเเกรมฉันเอง ==="
+echo "=== ตั้งค่าเครื่องมือออฟไลน์สำหรับ Dog PDF ==="
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "❌ ไม่พบ Homebrew ในเครื่อง กรุณาติดตั้งจาก https://brew.sh ก่อน"

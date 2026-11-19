@@ -1,4 +1,5 @@
 import AppKit
+import MacWheelCore
 import SwiftUI
 
 @MainActor
@@ -107,7 +108,7 @@ private struct HUDView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("โปรเเกรมฉันเอง")
+                Text(AppBranding.displayName)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(messageText)

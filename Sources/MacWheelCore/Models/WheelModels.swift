@@ -1,5 +1,11 @@
 import Foundation
 
+public enum AppBranding {
+    public static let displayName = "Dog PDF"
+    public static let bundleIdentifier = "com.personal.dogpdf"
+    public static let menuBarSymbolName = "dog.fill"
+}
+
 public enum FileCategory: String, CaseIterable, Sendable {
     case image
     case pdf

@@ -1,4 +1,5 @@
 import AppKit
+import MacWheelCore
 import SwiftUI
 
 @MainActor
@@ -16,7 +17,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "โปรเเกรมฉันเอง"
+        window.title = AppBranding.displayName
         window.titlebarAppearsTransparent = false
         window.minSize = NSSize(width: 380, height: 500)
         window.isReleasedWhenClosed = false
