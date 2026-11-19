@@ -18,6 +18,7 @@ struct MacWheelTestsMain {
         registerTask3Tests(runner)
         registerTask4Tests(runner)
         registerTask5Tests(runner)
+        registerTask6Tests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -358,5 +359,97 @@ func registerTask5Tests(_ runner: TestSuiteRunner) {
         try await assertThrowsAsync(WheelError.missingDependency("whisper-cli is not installed. Run Setup Dependencies from the menu bar.")) {
             _ = try await engine.transcribeMedia(source: movURL, language: "auto", toolPaths: missingTools)
         }
+    }
+}
+
+
+private struct MockTranslator: TextTranslating {
+    func translate(_ texts: [String], to target: TranslationLanguage) async throws -> [String] {
+        let prefix = target == .th ? "[TH] " : "[EN] "
+        return texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? $0 : prefix + $0 }
+    }
+}
+
+func registerTask6Tests(_ runner: TestSuiteRunner) {
+    runner.test("Task6", "TranslationEngine preserves SRT cue numbers and timestamps across multi-line cues") {
+        let dir = try makeTempDirectory("Task6SRT")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let srtURL = dir.appendingPathComponent("video.srt")
+        let srtBody = """
+        1
+        00:00:01,000 --> 00:00:03,500
+        Hello world
+        Second line here
+
+        2
+        00:00:04,000 --> 00:00:06,250
+        Goodbye now
+        """
+        try srtBody.write(to: srtURL, atomically: true, encoding: .utf8)
+
+        let engine = TranslationEngine()
+        let out = try await engine.translateFile(
+            source: srtURL,
+            to: .th,
+            translator: MockTranslator(),
+            toolPaths: OutputPathResolver.discoverTools()
+        )
+        try assertEqual(out.lastPathComponent, "video TH.srt")
+        let translated = try String(contentsOf: out, encoding: .utf8)
+        try assertTrue(translated.contains("1\n00:00:01,000 --> 00:00:03,500\n"))
+        try assertTrue(translated.contains("[TH] Hello world"))
+        try assertTrue(translated.contains("[TH] Second line here"))
+        try assertTrue(translated.contains("2\n00:00:04,000 --> 00:00:06,250\n[TH] Goodbye now"))
+    }
+
+    runner.test("Task6", "TranslationEngine translates TXT and scanned PDF into TH/EN .txt files") {
+        let dir = try makeTempDirectory("Task6Docs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let txtURL = dir.appendingPathComponent("memo.txt")
+        try "First paragraph.\n\nSecond paragraph.".write(to: txtURL, atomically: true, encoding: .utf8)
+
+        let scannedPDF = dir.appendingPathComponent("scan.pdf")
+        try TestFixtures.createScannedImagePDF(at: scannedPDF, text: "Hello Scan Document")
+
+        let engine = TranslationEngine()
+        let tools = OutputPathResolver.discoverTools()
+
+        let txtOut = try await engine.translateFile(source: txtURL, to: .th, translator: MockTranslator(), toolPaths: tools)
+        try assertEqual(txtOut.lastPathComponent, "memo TH.txt")
+        let txtContent = try String(contentsOf: txtOut, encoding: .utf8)
+        try assertTrue(txtContent.contains("[TH] First paragraph."))
+        try assertTrue(txtContent.contains("[TH] Second paragraph."))
+
+        let pdfOut = try await engine.translateFile(source: scannedPDF, to: .en, translator: MockTranslator(), toolPaths: tools)
+        try assertEqual(pdfOut.lastPathComponent, "scan EN.txt")
+        let pdfContent = try String(contentsOf: pdfOut, encoding: .utf8)
+        try assertTrue(pdfContent.contains("[EN]"))
+        try assertTrue(pdfContent.range(of: "Hello", options: .caseInsensitive) != nil)
+    }
+
+    runner.test("Task6", "JobExecutor merges 2 images into 1 PDF and batch-converts 2 TXT files to HTML") {
+        let dir = try makeTempDirectory("Task6Executor")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let img1 = dir.appendingPathComponent("p1.png")
+        let img2 = dir.appendingPathComponent("p2.jpg")
+        try TestFixtures.createTestImage(at: img1, width: 400, height: 300, utType: .png)
+        try TestFixtures.createTestImage(at: img2, width: 400, height: 300, utType: .jpeg)
+
+        let executor = JobExecutor(translator: MockTranslator())
+        let mergeResult = try await executor.execute(urls: [img1, img2], action: .mergePDF, settings: AppSettings()) { _ in }
+        try assertEqual(mergeResult.outputURLs.count, 1)
+        try assertEqual(PDFDocument(url: mergeResult.outputURLs[0])?.pageCount ?? 0, 2)
+
+        let t1 = dir.appendingPathComponent("a.txt")
+        let t2 = dir.appendingPathComponent("b.txt")
+        try "One".write(to: t1, atomically: true, encoding: .utf8)
+        try "Two".write(to: t2, atomically: true, encoding: .utf8)
+
+        let batchResult = try await executor.execute(urls: [t1, t2], action: .toHTML, settings: AppSettings()) { _ in }
+        try assertEqual(batchResult.outputURLs.count, 2)
+        try assertTrue(batchResult.outputURLs.allSatisfy { $0.pathExtension.lowercased() == "html" })
     }
 }
