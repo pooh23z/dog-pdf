@@ -124,7 +124,7 @@ private final class WheelDropView: NSView {
         let pb = sender.draggingPasteboard
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         if let objs = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL], !objs.isEmpty {
-            return objs
+            return DragPasteboardNormalizer.normalize(objs)
         }
         return draggedURLs
     }

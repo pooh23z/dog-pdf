@@ -74,3 +74,17 @@ public struct DragTriggerEvaluator {
         movedEnough && pasteboardChanged && hasFileURLs
     }
 }
+
+public struct DragPasteboardNormalizer {
+    public static func normalize(_ urls: [URL]) -> [URL] {
+        var seen: Set<String> = []
+        var result: [URL] = []
+        for url in urls where url.isFileURL {
+            let resolved = URL(fileURLWithPath: url.path).standardizedFileURL
+            if seen.insert(resolved.path).inserted {
+                result.append(resolved)
+            }
+        }
+        return result
+    }
+}

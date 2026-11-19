@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
 
     private let executor = JobExecutor()
     let hud = ProgressHUDController()
+    private var observers: [NSObjectProtocol] = []
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
@@ -40,6 +41,27 @@ final class AppState: ObservableObject {
         }
         self.dependencyStatus = OutputPathResolver.discoverTools().dependencyStatus()
         self.accessibilityTrusted = DragMonitor.isAccessibilityTrusted
+
+        let activeObs = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshStatus()
+            }
+        }
+        let axObs = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.accessibility.api"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                self?.refreshStatus()
+            }
+        }
+        observers = [activeObs, axObs]
     }
 
     func refreshStatus() {
@@ -267,6 +289,7 @@ struct AppControlView: View {
             }
             Toggle("", isOn: $state.settings.isEnabled)
                 .toggleStyle(.switch)
+                .tint(.orange)
                 .labelsHidden()
             if let onClose {
                 Button {

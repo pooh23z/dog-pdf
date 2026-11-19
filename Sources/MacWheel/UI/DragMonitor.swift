@@ -19,7 +19,7 @@ final class DragMonitor {
     }
 
     static var isAccessibilityTrusted: Bool {
-        AXIsProcessTrusted()
+        AXIsProcessTrusted() || CGPreflightListenEventAccess()
     }
 
     static func promptForAccessibility() {
@@ -107,7 +107,8 @@ final class DragMonitor {
 
         let currentPoint = NSEvent.mouseLocation
         let dragPB = NSPasteboard(name: .drag)
-        let pbURLs = (dragPB.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let rawURLs = (dragPB.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let pbURLs = DragPasteboardNormalizer.normalize(rawURLs)
         let pbChanged = dragPB.changeCount != lastDragChangeCount
 
         let movedEnough: Bool

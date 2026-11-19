@@ -653,4 +653,16 @@ func registerBrandingTests(_ runner: TestSuiteRunner) {
         try assertEqual(AppBranding.menuBarSymbolName, "dog.fill")
         try assertTrue(NSImage(systemSymbolName: AppBranding.menuBarSymbolName, accessibilityDescription: nil) != nil)
     }
+
+    runner.test("Branding", "DragPasteboardNormalizer resolves standard file URLs and deduplicates") {
+        let dir = try makeTempDirectory("NormalizeURLs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("sample.pdf")
+        try Data("pdf".utf8).write(to: file)
+
+        let refURL = (file as NSURL).fileReferenceURL() ?? file
+        let normalized = DragPasteboardNormalizer.normalize([refURL, file])
+        try assertEqual(normalized.count, 1)
+        try assertEqual(normalized[0].pathExtension.lowercased(), "pdf")
+    }
 }
