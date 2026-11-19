@@ -16,6 +16,7 @@ public struct ImageEngine: Sendable {
         source: URL,
         to action: WheelAction,
         preset: CompressionPreset,
+        targetFileSize: TargetFileSize = .auto,
         toolPaths: ToolPaths
     ) async throws -> URL {
         guard FileManager.default.fileExists(atPath: source.path) else {
@@ -57,6 +58,9 @@ public struct ImageEngine: Sendable {
             return dest
 
         case .compress:
+            if let maxBytes = targetFileSize.maxBytes {
+                return try compressImageToTargetBytes(source: source, maxBytes: maxBytes, suffix: targetFileSize.fileSuffix)
+            }
             return try await compressImage(source: source, preset: preset, toolPaths: toolPaths)
 
         default:
@@ -99,6 +103,84 @@ public struct ImageEngine: Sendable {
             throw WheelError.processFailed("Failed to write merged PDF.")
         }
         return dest
+    }
+
+    private func compressImageToTargetBytes(source: URL, maxBytes: Int64, suffix: String) throws -> URL {
+        guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil) else {
+            throw WheelError.invalidFile("Cannot open image: \(source.lastPathComponent)")
+        }
+
+        let edgeCandidates: [Int?] = [nil, 2560, 1920, 1440, 1080, 800, 600, 420, 300]
+        var smallestFallback: Data?
+
+        for edge in edgeCandidates {
+            guard let cgImage = decodeCGImage(from: imageSource, maxPixelEdge: edge) else { continue }
+
+            // Quick check at lowest acceptable quality for this resolution before binary searching.
+            guard let minData = encodeJPEGMemory(cgImage, quality: 0.18) else { continue }
+            if smallestFallback == nil || minData.count < smallestFallback!.count {
+                smallestFallback = minData
+            }
+            if Int64(minData.count) > maxBytes {
+                continue
+            }
+
+            // Binary search for highest quality that stays <= maxBytes.
+            var low: CGFloat = 0.18
+            var high: CGFloat = 0.92
+            var bestData = minData
+            for _ in 0..<6 {
+                let mid = (low + high) / 2.0
+                if let candidate = encodeJPEGMemory(cgImage, quality: mid) {
+                    if Int64(candidate.count) <= maxBytes {
+                        bestData = candidate
+                        low = mid
+                    } else {
+                        high = mid
+                    }
+                }
+            }
+
+            let dest = OutputPathResolver.uniqueFileURL(beside: source, suffix: suffix, newExtension: "jpg")
+            try bestData.write(to: dest, options: .atomic)
+            return dest
+        }
+
+        guard let fallback = smallestFallback else {
+            throw WheelError.processFailed("Unable to compress image \(source.lastPathComponent)")
+        }
+        let dest = OutputPathResolver.uniqueFileURL(beside: source, suffix: suffix, newExtension: "jpg")
+        try fallback.write(to: dest, options: .atomic)
+        return dest
+    }
+
+    private func decodeCGImage(from imageSource: CGImageSource, maxPixelEdge: Int?) -> CGImage? {
+        if let maxPixelEdge {
+            let thumbOpts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelEdge
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(imageSource, 0, thumbOpts as CFDictionary)
+        } else {
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(imageSource, 0, opts as CFDictionary)
+                ?? CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+        }
+    }
+
+    private func encodeJPEGMemory(_ image: CGImage, quality: CGFloat) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        CGImageDestinationAddImage(dest, image, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
     }
 
     private func compressImage(source: URL, preset: CompressionPreset, toolPaths: ToolPaths) async throws -> URL {

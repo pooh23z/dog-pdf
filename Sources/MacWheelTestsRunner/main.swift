@@ -25,6 +25,7 @@ struct MacWheelTestsMain {
         registerMainWindowTests(runner)
         registerBrandingTests(runner)
         registerDogAnimationTests(runner)
+        registerV2UpgradeTests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -699,5 +700,73 @@ func registerDogAnimationTests(_ runner: TestSuiteRunner) {
             _ = controller.stepFrame()
         }
         try assertEqual(controller.mode, .idle)
+    }
+}
+
+
+func registerV2UpgradeTests(_ runner: TestSuiteRunner) {
+    runner.test("V2Upgrade", "MascotCharacter provides 10 distinct animals and AppSettings decodes legacy JSON") {
+        try assertEqual(MascotCharacter.allCases.count, 10)
+        try assertEqual(Set(MascotCharacter.allCases.map(\.rawValue)).count, 10)
+        try assertTrue(MascotCharacter.allCases.allSatisfy { !$0.thaiName.isEmpty })
+
+        try assertEqual(TargetFileSize.auto.maxBytes, nil)
+        try assertEqual(TargetFileSize.mb2.maxBytes, 2_000_000)
+        try assertEqual(TargetFileSize.mb1.maxBytes, 1_000_000)
+        try assertEqual(TargetFileSize.kb500.maxBytes, 500_000)
+        try assertEqual(TargetFileSize.kb200.maxBytes, 200_000)
+        try assertEqual(TargetFileSize.kb100.maxBytes, 100_000)
+
+        let legacy = #"{"isEnabled":true,"trigger":"shift","compressionPreset":"balanced","whisperLanguage":"auto"}"#
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(legacy.utf8))
+        try assertEqual(decoded.mascot, .shiba)
+        try assertEqual(decoded.targetFileSize, .auto)
+    }
+
+    runner.test("V2Upgrade", "ImageEngine compresses large noisy image under 100KB target size") {
+        let dir = try makeTempDirectory("V2ImageTarget")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let src = dir.appendingPathComponent("huge_photo.png")
+        try TestFixtures.createTestImage(at: src, width: 2000, height: 1500, utType: .png, noisy: true)
+
+        let out = try await ImageEngine().convertImage(
+            source: src,
+            to: .compress,
+            preset: .balanced,
+            targetFileSize: .kb100,
+            toolPaths: OutputPathResolver.discoverTools()
+        )
+        let bytes = (try FileManager.default.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+        try assertTrue(bytes > 0 && bytes <= 100_000, "Expected <= 100000 bytes, got \(bytes)")
+        try assertTrue(out.lastPathComponent.contains("100KB"), "Filename was \(out.lastPathComponent)")
+    }
+
+    runner.test("V2Upgrade", "PDFEngine compresses large image PDF under 200KB target size") {
+        let dir = try makeTempDirectory("V2PDFTarget")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let imgURL = dir.appendingPathComponent("scan_big.png")
+        try TestFixtures.createTestImage(at: imgURL, width: 2400, height: 1600, utType: .png, noisy: true)
+        let pdfURL = try await ImageEngine().convertImage(source: imgURL, to: .toPDF, preset: .balanced, toolPaths: OutputPathResolver.discoverTools())
+
+        let out = try await PDFEngine().compressPDF(pdfURL: pdfURL, preset: .balanced, targetFileSize: .kb200)
+        let bytes = (try FileManager.default.attributesOfItem(atPath: out.path)[.size] as? NSNumber)?.int64Value ?? 0
+        try assertTrue(bytes > 0 && bytes <= 200_000, "Expected PDF <= 200000 bytes, got \(bytes)")
+        try assertEqual(PDFDocument(url: out)?.pageCount ?? 0, 1)
+    }
+
+    runner.test("V2Upgrade", "JobExecutor compress summary includes human-readable before and after file sizes") {
+        let dir = try makeTempDirectory("V2Summary")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let src = dir.appendingPathComponent("pic.png")
+        try TestFixtures.createTestImage(at: src, width: 1800, height: 1200, utType: .png, noisy: true)
+
+        var settings = AppSettings()
+        settings.targetFileSize = .kb200
+        let result = try await JobExecutor(translator: MockTranslator()).execute(urls: [src], action: .compress, settings: settings) { _ in }
+        try assertEqual(result.outputURLs.count, 1)
+        try assertTrue(result.summary.contains("→"), "Expected size delta in summary, got: \(result.summary)")
     }
 }

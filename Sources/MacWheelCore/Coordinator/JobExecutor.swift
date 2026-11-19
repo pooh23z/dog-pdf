@@ -83,6 +83,7 @@ public actor JobExecutor {
                     source: url,
                     to: action,
                     preset: settings.compressionPreset,
+                    targetFileSize: settings.targetFileSize,
                     toolPaths: toolPaths
                 )
                 outputs.append(out)
@@ -97,7 +98,11 @@ public actor JobExecutor {
                 case .toDOCX:
                     out = try await pdfEngine.exportPDFToDOCX(pdfURL: url)
                 case .compress:
-                    out = try await pdfEngine.compressPDF(pdfURL: url, preset: settings.compressionPreset)
+                    out = try await pdfEngine.compressPDF(
+                        pdfURL: url,
+                        preset: settings.compressionPreset,
+                        targetFileSize: settings.targetFileSize
+                    )
                 default:
                     throw WheelError.unsupportedAction("Action \(action.label) is not supported for PDF.")
                 }
@@ -127,10 +132,19 @@ public actor JobExecutor {
 
         let summary: String
         if outputs.count == 1 {
-            summary = "Saved \(outputs[0].lastPathComponent)"
+            if action == .compress, urls.count == 1,
+               let inBytes = fileSize(urls[0]), let outBytes = fileSize(outputs[0]) {
+                summary = "\(outputs[0].lastPathComponent) (\(formatReadableByteCount(inBytes)) → \(formatReadableByteCount(outBytes)))"
+            } else {
+                summary = "Saved \(outputs[0].lastPathComponent)"
+            }
         } else {
             summary = "Saved \(outputs.count) items"
         }
         return JobResult(outputURLs: outputs, summary: summary)
+    }
+
+    private func fileSize(_ url: URL) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
     }
 }

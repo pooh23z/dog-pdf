@@ -12,14 +12,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: contentView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 490, height: 670),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = AppBranding.displayName
         window.titlebarAppearsTransparent = false
-        window.minSize = NSSize(width: 380, height: 500)
+        window.minSize = NSSize(width: 420, height: 560)
         window.isReleasedWhenClosed = false
         window.contentViewController = hosting
 

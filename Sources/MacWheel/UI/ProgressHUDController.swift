@@ -7,15 +7,16 @@ final class ProgressHUDController {
     private var panel: NSPanel?
     private var dismissWorkItem: DispatchWorkItem?
 
-    func showProgress(message: String) {
+    func showProgress(message: String, character: MascotCharacter = .shiba) {
         dismissWorkItem?.cancel()
-        present(view: HUDView(state: .working(message), onReveal: nil, onDismiss: { [weak self] in self?.hide() }))
+        present(view: HUDView(state: .working(message), character: character, onReveal: nil, onDismiss: { [weak self] in self?.hide() }))
     }
 
-    func showSuccess(summary: String, revealURLs: [URL]) {
+    func showSuccess(summary: String, revealURLs: [URL], character: MascotCharacter = .shiba) {
         dismissWorkItem?.cancel()
         present(view: HUDView(
             state: .success(summary),
+            character: character,
             onReveal: revealURLs.isEmpty ? nil : {
                 NSWorkspace.shared.activateFileViewerSelecting(revealURLs)
             },
@@ -24,9 +25,9 @@ final class ProgressHUDController {
         scheduleAutoHide(after: 4.5)
     }
 
-    func showError(message: String) {
+    func showError(message: String, character: MascotCharacter = .shiba) {
         dismissWorkItem?.cancel()
-        present(view: HUDView(state: .error(message), onReveal: nil, onDismiss: { [weak self] in self?.hide() }))
+        present(view: HUDView(state: .error(message), character: character, onReveal: nil, onDismiss: { [weak self] in self?.hide() }))
         scheduleAutoHide(after: 6.0)
     }
 
@@ -88,6 +89,7 @@ private enum HUDState {
 
 private struct HUDView: View {
     let state: HUDState
+    let character: MascotCharacter
     let onReveal: (() -> Void)?
     let onDismiss: () -> Void
 
@@ -95,7 +97,7 @@ private struct HUDView: View {
         HStack(spacing: 10) {
             switch state {
             case .working:
-                AnimatedDogMascotView(isBusy: true, size: 32)
+                AnimatedDogMascotView(character: character, isBusy: true, size: 34)
             case .success:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)

@@ -82,8 +82,57 @@ public struct PDFEngine: Sendable {
         return dest
     }
 
-    public func compressPDF(pdfURL: URL, preset: CompressionPreset) async throws -> URL {
+    public func compressPDF(
+        pdfURL: URL,
+        preset: CompressionPreset,
+        targetFileSize: TargetFileSize = .auto
+    ) async throws -> URL {
         let doc = try loadPDF(at: pdfURL)
+
+        if let maxBytes = targetFileSize.maxBytes {
+            let tiers: [(CGFloat, CGFloat)] = [
+                (150, 0.72),
+                (120, 0.58),
+                (96, 0.45),
+                (72, 0.34),
+                (56, 0.24),
+                (44, 0.16)
+            ]
+            let dest = OutputPathResolver.uniqueFileURL(beside: pdfURL, suffix: targetFileSize.fileSuffix, newExtension: "pdf")
+            var bestTemp: URL?
+            var bestSize: Int64 = .max
+
+            defer {
+                if let bestTemp, FileManager.default.fileExists(atPath: bestTemp.path) {
+                    try? FileManager.default.removeItem(at: bestTemp)
+                }
+            }
+
+            for (dpi, quality) in tiers {
+                let candidate = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("macwheel-pdf-\(UUID().uuidString).pdf")
+                try writeCompressedPDF(doc: doc, dpi: dpi, quality: quality, to: candidate)
+                let size = (try? FileManager.default.attributesOfItem(atPath: candidate.path)[.size] as? NSNumber)?.int64Value ?? .max
+                if size <= maxBytes {
+                    try FileManager.default.moveItem(at: candidate, to: dest)
+                    return dest
+                }
+                if size < bestSize {
+                    if let old = bestTemp { try? FileManager.default.removeItem(at: old) }
+                    bestTemp = candidate
+                    bestSize = size
+                } else {
+                    try? FileManager.default.removeItem(at: candidate)
+                }
+            }
+
+            if let bestTemp {
+                try FileManager.default.moveItem(at: bestTemp, to: dest)
+                return dest
+            }
+            throw WheelError.processFailed("Failed to compress PDF to target size.")
+        }
+
         let (dpi, quality): (CGFloat, CGFloat) = switch preset {
         case .balanced: (150, 0.75)
         case .small: (110, 0.60)
@@ -91,8 +140,12 @@ public struct PDFEngine: Sendable {
         }
 
         let dest = OutputPathResolver.uniqueFileURL(beside: pdfURL, suffix: " (compressed)", newExtension: "pdf")
-        let outDoc = PDFDocument()
+        try writeCompressedPDF(doc: doc, dpi: dpi, quality: quality, to: dest)
+        return dest
+    }
 
+    private func writeCompressedPDF(doc: PDFDocument, dpi: CGFloat, quality: CGFloat, to dest: URL) throws {
+        let outDoc = PDFDocument()
         for idx in 0..<doc.pageCount {
             guard let page = doc.page(at: idx) else { continue }
             let visualBounds = page.bounds(for: .mediaBox).applying(page.transform(for: .mediaBox))
@@ -110,7 +163,6 @@ public struct PDFEngine: Sendable {
         guard outDoc.pageCount > 0, outDoc.write(to: dest) else {
             throw WheelError.processFailed("Failed to write compressed PDF: \(dest.lastPathComponent)")
         }
-        return dest
     }
 
     private func loadPDF(at url: URL) throws -> PDFDocument {
