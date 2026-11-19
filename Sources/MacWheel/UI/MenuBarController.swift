@@ -21,10 +21,12 @@ final class AppState: ObservableObject {
     @Published var dependencyStatus: DependencyStatus
     @Published var accessibilityTrusted: Bool
     @Published var recentJobs: [RecentJobEntry] = []
-    @Published var isBusy: Bool = false
+    @Published var activeJobCount: Int = 0
     @Published var droppedURLs: [URL] = []
     @Published var isDropTargeted: Bool = false
     @Published var lastError: String?
+
+    var isBusy: Bool { activeJobCount > 0 }
 
     private let executor = JobExecutor()
     let hud = ProgressHUDController()
@@ -55,8 +57,8 @@ final class AppState: ObservableObject {
     func runAction(urls: [URL], action: WheelAction) {
         guard !urls.isEmpty else { return }
         lastError = nil
-        isBusy = true
-        hud.showProgress(message: "\(action.label): \(urls[0].lastPathComponent)…")
+        activeJobCount += 1
+        hud.showProgress(message: activeJobCount > 1 ? "[\(activeJobCount) jobs] \(action.label): \(urls[0].lastPathComponent)…" : "\(action.label): \(urls[0].lastPathComponent)…")
 
         let currentSettings = settings
         let tools = OutputPathResolver.discoverTools()
@@ -70,10 +72,12 @@ final class AppState: ObservableObject {
                     toolPaths: tools
                 ) { [weak self] message in
                     Task { @MainActor in
-                        self?.hud.showProgress(message: message)
+                        guard let self else { return }
+                        let prefix = self.activeJobCount > 1 ? "[\(self.activeJobCount) jobs] " : ""
+                        self.hud.showProgress(message: prefix + message)
                     }
                 }
-                self.isBusy = false
+                self.activeJobCount = max(0, self.activeJobCount - 1)
                 self.droppedURLs = []
                 self.recentJobs.insert(
                     RecentJobEntry(title: result.summary, outputURLs: result.outputURLs, timestamp: Date()),
@@ -83,12 +87,18 @@ final class AppState: ObservableObject {
                     self.recentJobs = Array(self.recentJobs.prefix(8))
                 }
                 NSSound(named: NSSound.Name("Glass"))?.play()
-                self.hud.showSuccess(summary: result.summary, revealURLs: result.outputURLs)
+                if self.activeJobCount == 0 {
+                    self.hud.showSuccess(summary: result.summary, revealURLs: result.outputURLs)
+                } else {
+                    self.hud.showProgress(message: "เสร็จไป 1 งาน (\(result.summary)) — เหลืออีก \(self.activeJobCount) งาน…")
+                }
             } catch {
-                self.isBusy = false
+                self.activeJobCount = max(0, self.activeJobCount - 1)
                 let message = error.localizedDescription
                 self.lastError = message
-                self.hud.showError(message: message)
+                if self.activeJobCount == 0 {
+                    self.hud.showError(message: message)
+                }
             }
         }
     }
@@ -153,9 +163,13 @@ final class MenuBarController: NSObject {
             button.target = self
         }
 
-        popover.behavior = .transient
+        popover.behavior = .applicationDefined
         popover.contentSize = NSSize(width: 340, height: 520)
-        popover.contentViewController = NSHostingController(rootView: MenuBarPopoverView(state: state))
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarPopoverView(state: state, onClose: { [weak self] in
+                self?.popover.performClose(nil)
+            })
+        )
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
@@ -172,6 +186,7 @@ final class MenuBarController: NSObject {
 
 private struct MenuBarPopoverView: View {
     @ObservedObject var state: AppState
+    let onClose: () -> Void
 
     var body: some View {
         ScrollView {
@@ -212,6 +227,14 @@ private struct MenuBarPopoverView: View {
             Toggle("", isOn: $state.settings.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("ปิดหน้าต่าง")
         }
     }
 

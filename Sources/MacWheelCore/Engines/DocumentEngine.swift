@@ -86,10 +86,33 @@ public struct DocumentEngine: Sendable {
         try loadAttributedString(from: source).string
     }
 
+    public static func sanitizeHTMLForOffline(_ html: String) -> String {
+        var cleaned = html
+        let patterns = [
+            #"(?is)<script\b[^>]*>.*?</script>"#,
+            #"(?is)<link\b[^>]*>"#,
+            #"(?i)\b(?:src|href|poster|data)\s*=\s*(?:"(?:https?:|//)[^"]*"|'(?:https?:|//)[^']*')"#,
+            #"(?i)url\(\s*["']?(?:https?:|//)[^)]*\)"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(in: cleaned, range: range, withTemplate: "")
+            }
+        }
+        return cleaned
+    }
+
     private func loadAttributedString(from source: URL) throws -> NSAttributedString {
         let ext = source.pathExtension.lowercased()
         if ext == "txt" || ext == "md" || ext == "markdown" || ext == "srt" {
-            let raw = try String(contentsOf: source, encoding: .utf8)
+            var enc: String.Encoding = .utf8
+            let raw: String
+            do {
+                raw = try String(contentsOf: source, usedEncoding: &enc)
+            } catch {
+                throw WheelError.invalidFile("Unable to read text file \(source.lastPathComponent): \(error.localizedDescription)")
+            }
             return NSAttributedString(
                 string: raw,
                 attributes: [
@@ -99,9 +122,51 @@ public struct DocumentEngine: Sendable {
             )
         }
 
+        if ext == "html" || ext == "htm" {
+            var enc: String.Encoding = .utf8
+            guard let rawHTML = try? String(contentsOf: source, usedEncoding: &enc) else {
+                throw WheelError.invalidFile("Unable to read HTML file \(source.lastPathComponent)")
+            }
+            let sanitized = Self.sanitizeHTMLForOffline(rawHTML)
+            let tmpHTML = FileManager.default.temporaryDirectory
+                .appendingPathComponent("macwheel-html-\(UUID().uuidString).html")
+            let tmpRTF = FileManager.default.temporaryDirectory
+                .appendingPathComponent("macwheel-html-\(UUID().uuidString).rtf")
+            defer {
+                try? FileManager.default.removeItem(at: tmpHTML)
+                try? FileManager.default.removeItem(at: tmpRTF)
+            }
+            try sanitized.write(to: tmpHTML, atomically: true, encoding: .utf8)
+
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/textutil")
+            proc.arguments = ["-convert", "rtf", "-output", tmpRTF.path, tmpHTML.path]
+            proc.standardInput = FileHandle.nullDevice
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            try proc.run()
+            proc.waitUntilExit()
+
+            if proc.terminationStatus == 0,
+               let attr = try? NSAttributedString(
+                   url: tmpRTF,
+                   options: [.documentType: NSAttributedString.DocumentType.rtf],
+                   documentAttributes: nil
+               ) {
+                return attr
+            }
+            // Pure offline tag-strip fallback if textutil fails
+            let stripped = sanitized.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return NSAttributedString(
+                string: stripped,
+                attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.black]
+            )
+        }
+
         let docType: NSAttributedString.DocumentType? = switch ext {
         case "rtf": .rtf
-        case "html", "htm": .html
         case "docx": .officeOpenXML
         case "doc": .docFormat
         default: nil

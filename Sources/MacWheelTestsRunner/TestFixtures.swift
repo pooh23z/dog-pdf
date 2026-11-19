@@ -117,4 +117,56 @@ enum TestFixtures {
             throw TestFailure(message: "Failed to write scanned PDF")
         }
     }
+
+    static func createJPEGWithSmallThumbnail(at url: URL, width: Int, height: Int) throws {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw TestFailure(message: "Failed to create CGContext")
+        }
+        ctx.setFillColor(CGColor(red: 0.2, green: 0.6, blue: 0.9, alpha: 1.0))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let cgImage = ctx.makeImage(),
+              let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw TestFailure(message: "Failed to create JPEG destination")
+        }
+        let props: [CFString: Any] = [
+            kCGImageDestinationEmbedThumbnail: true,
+            kCGImageDestinationLossyCompressionQuality: 0.9
+        ]
+        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
+        if !CGImageDestinationFinalize(dest) {
+            throw TestFailure(message: "Failed to finalize JPEG with thumbnail")
+        }
+    }
+
+    static func createRotatedPDF(at url: URL) throws {
+        // Portrait 400x800 page rotated 90 degrees -> visually landscape 800x400.
+        var mediaBox = CGRect(x: 0, y: 0, width: 400, height: 800)
+        guard let consumer = CGDataConsumer(url: url as CFURL),
+              let ctx = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+            throw TestFailure(message: "Failed to create rotated PDF context")
+        }
+        ctx.beginPDFPage(nil)
+        ctx.setFillColor(CGColor(red: 0.9, green: 0.4, blue: 0.1, alpha: 1.0))
+        ctx.fill(mediaBox)
+        ctx.endPDFPage()
+        ctx.closePDF()
+
+        guard let doc = PDFDocument(url: url), let page = doc.page(at: 0) else {
+            throw TestFailure(message: "Failed to reload PDF for rotation")
+        }
+        page.rotation = 90
+        if !doc.write(to: url) {
+            throw TestFailure(message: "Failed to save rotated PDF")
+        }
+    }
 }

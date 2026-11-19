@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import Translation
 
 public struct SRTCue: Equatable, Sendable {
@@ -43,18 +44,25 @@ public struct AppleTranslationProvider: TextTranslating {
         guard !texts.isEmpty else { return [] }
 
         if #available(macOS 26.0, *) {
-            let sourceLang = Locale.Language(identifier: target.sourceCode)
+            let detectedSource = detectSourceLanguage(in: texts, target: target)
+            let sourceLang = Locale.Language(identifier: detectedSource)
             let targetLang = Locale.Language(identifier: target.rawValue)
+
+            if detectedSource == target.rawValue {
+                return texts
+            }
+
             let availability = LanguageAvailability()
             let status = await availability.status(from: sourceLang, to: targetLang)
             guard status == .installed else {
                 throw WheelError.missingTranslationPack(
-                    "Offline translation pack (\(target.sourceCode.uppercased()) → \(target.rawValue.uppercased())) is not downloaded. Go to System Settings → General → Language & Region → Translation Languages and download Thai & English."
+                    "Offline translation pack (\(detectedSource.uppercased()) → \(target.rawValue.uppercased())) is not downloaded. Go to System Settings → General → Language & Region → Translation Languages and download Thai & English."
                 )
             }
 
+            // Reuse a single TranslationSession for all batches of this file.
             let session = TranslationSession(installedSource: sourceLang, target: targetLang)
-            var results = Array(repeating: "", count: texts.count)
+            var results = texts
 
             var batchIndices: [Int] = []
             var batchRequests: [TranslationSession.Request] = []
@@ -64,7 +72,9 @@ public struct AppleTranslationProvider: TextTranslating {
                 guard !batchRequests.isEmpty else { return }
                 let responses = try await session.translations(from: batchRequests)
                 for (offset, response) in responses.enumerated() {
-                    if offset < batchIndices.count {
+                    if let cid = response.clientIdentifier, let exactIndex = Int(cid), exactIndex >= 0, exactIndex < results.count {
+                        results[exactIndex] = response.targetText
+                    } else if offset < batchIndices.count {
                         results[batchIndices[offset]] = response.targetText
                     }
                 }
@@ -92,11 +102,25 @@ public struct AppleTranslationProvider: TextTranslating {
             throw WheelError.missingTranslationPack("Offline Apple Translation requires macOS 26 or newer.")
         }
     }
+
+    private func detectSourceLanguage(in texts: [String], target: TranslationLanguage) -> String {
+        let sample = texts.prefix(12).joined(separator: "\n").prefix(2000)
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(String(sample))
+        if let dominant = recognizer.dominantLanguage, dominant != .undetermined {
+            let code = dominant.rawValue
+            if !code.isEmpty {
+                return code
+            }
+        }
+        return target.sourceCode
+    }
 }
 
 public struct TranslationEngine: Sendable {
     private let pdfEngine: PDFEngine
     private let documentEngine: DocumentEngine
+    private static let maxChunkLength = 1400
 
     public init(pdfEngine: PDFEngine = PDFEngine(), documentEngine: DocumentEngine = DocumentEngine()) {
         self.pdfEngine = pdfEngine
@@ -104,15 +128,33 @@ public struct TranslationEngine: Sendable {
     }
 
     public static func parseSRT(_ raw: String) -> [SRTCue] {
-        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        var cleaned = raw
+        if cleaned.hasPrefix("\u{FEFF}") {
+            cleaned.removeFirst()
+        }
+        let normalized = cleaned
+            .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let blocks = normalized.components(separatedBy: "\n\n")
-        var cues: [SRTCue] = []
 
-        for block in blocks {
-            let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                .drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty })
-            let arr = Array(lines)
+        // Split into blocks separated by lines that are empty or whitespace-only.
+        var blocks: [[String]] = []
+        var current: [String] = []
+        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !current.isEmpty {
+                    blocks.append(current)
+                    current.removeAll(keepingCapacity: true)
+                }
+            } else {
+                current.append(line)
+            }
+        }
+        if !current.isEmpty {
+            blocks.append(current)
+        }
+
+        var cues: [SRTCue] = []
+        for arr in blocks {
             guard arr.count >= 2 else { continue }
             if arr[1].contains("-->") {
                 let textLines = arr.count > 2 ? Array(arr[2...]) : []
@@ -140,10 +182,13 @@ public struct TranslationEngine: Sendable {
 
         let ext = source.pathExtension.lowercased()
         if ext == "srt" {
-            let raw = try String(contentsOf: source, encoding: .utf8)
+            let raw = try readTextWithFallbackEncoding(from: source)
             let cues = Self.parseSRT(raw)
+            guard !cues.isEmpty else {
+                throw WheelError.invalidFile("No valid subtitle cues found in \(source.lastPathComponent).")
+            }
             let allLines = cues.flatMap { $0.textLines }
-            let translatedLines = try await translateInChunks(allLines, to: target, translator: translator)
+            let translatedLines = try await translator.translate(allLines, to: target)
 
             var cursor = 0
             var newCues: [SRTCue] = []
@@ -166,48 +211,109 @@ public struct TranslationEngine: Sendable {
             extractedText = try documentEngine.extractPlainText(from: source)
         }
 
-        let trimmed = extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        var normalized = extractedText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        if normalized.hasPrefix("\u{FEFF}") {
+            normalized.removeFirst()
+        }
+
+        guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw WheelError.invalidFile("No readable text found in \(source.lastPathComponent).")
         }
 
-        let normalized = extractedText.replacingOccurrences(of: "\r\n", with: "\n")
-        let paragraphs = normalized.components(separatedBy: "\n\n")
-        let translatedParagraphs = try await translateInChunks(paragraphs, to: target, translator: translator)
+        let (chunks, separators) = splitDocumentIntoBoundedChunks(normalized, maxChars: Self.maxChunkLength)
+        let translatedChunks = try await translator.translate(chunks, to: target)
+
+        var rebuilt = ""
+        for idx in 0..<translatedChunks.count {
+            rebuilt += translatedChunks[idx]
+            if idx < separators.count {
+                rebuilt += separators[idx]
+            }
+        }
 
         let dest = OutputPathResolver.uniqueFileURL(beside: source, suffix: target.outputSuffix, newExtension: "txt")
-        try translatedParagraphs.joined(separator: "\n\n").write(to: dest, atomically: true, encoding: .utf8)
+        try rebuilt.write(to: dest, atomically: true, encoding: .utf8)
         _ = toolPaths
         return dest
     }
 
-    private func translateInChunks(
-        _ items: [String],
-        to target: TranslationLanguage,
-        translator: TextTranslating
-    ) async throws -> [String] {
-        var output: [String] = []
-        output.reserveCapacity(items.count)
-
-        var currentBatch: [String] = []
-        var currentChars = 0
-
-        func flush() async throws {
-            guard !currentBatch.isEmpty else { return }
-            let translated = try await translator.translate(currentBatch, to: target)
-            output.append(contentsOf: translated)
-            currentBatch.removeAll(keepingCapacity: true)
-            currentChars = 0
+    private func readTextWithFallbackEncoding(from url: URL) throws -> String {
+        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
+            return utf8
         }
+        var detected: String.Encoding = .utf8
+        if let decoded = try? String(contentsOf: url, usedEncoding: &detected) {
+            return decoded
+        }
+        throw WheelError.invalidFile("Unable to decode text file \(url.lastPathComponent).")
+    }
 
-        for item in items {
-            if !currentBatch.isEmpty && (currentChars + item.count > 1500 || currentBatch.count >= 25) {
-                try await flush()
+    /// Splits a document into chunks each <= `maxChars` while preserving paragraph (`\n\n`)
+    /// and line (`\n`) separators so single-newline PDFs/DOCXs never produce giant requests.
+    private func splitDocumentIntoBoundedChunks(_ text: String, maxChars: Int) -> (chunks: [String], separators: [String]) {
+        let paragraphs = text.components(separatedBy: "\n\n")
+        var chunks: [String] = []
+        var separators: [String] = []
+
+        for (pIndex, paragraph) in paragraphs.enumerated() {
+            let subChunks = splitOversizedParagraph(paragraph, maxChars: maxChars)
+            for (sIndex, sub) in subChunks.enumerated() {
+                chunks.append(sub)
+                if sIndex + 1 < subChunks.count {
+                    separators.append("\n")
+                } else if pIndex + 1 < paragraphs.count {
+                    separators.append("\n\n")
+                }
             }
-            currentBatch.append(item)
-            currentChars += item.count
         }
-        try await flush()
-        return output
+        return (chunks, separators)
+    }
+
+    private func splitOversizedParagraph(_ paragraph: String, maxChars: Int) -> [String] {
+        guard paragraph.count > maxChars else { return [paragraph] }
+
+        let lines = paragraph.components(separatedBy: "\n")
+        var result: [String] = []
+        var current = ""
+
+        for line in lines {
+            if line.count > maxChars {
+                if !current.isEmpty {
+                    result.append(current)
+                    current = ""
+                }
+                result.append(contentsOf: hardWrapLine(line, maxChars: maxChars))
+                continue
+            }
+            let candidate = current.isEmpty ? line : (current + "\n" + line)
+            if candidate.count > maxChars {
+                result.append(current)
+                current = line
+            } else {
+                current = candidate
+            }
+        }
+        if !current.isEmpty {
+            result.append(current)
+        }
+        return result
+    }
+
+    private func hardWrapLine(_ line: String, maxChars: Int) -> [String] {
+        var pieces: [String] = []
+        var start = line.startIndex
+        while start < line.endIndex {
+            let end = line.index(start, offsetBy: maxChars, limitedBy: line.endIndex) ?? line.endIndex
+            if end < line.endIndex, let space = line[start..<end].lastIndex(of: " "), space > start {
+                pieces.append(String(line[start..<space]))
+                start = line.index(after: space)
+            } else {
+                pieces.append(String(line[start..<end]))
+                start = end
+            }
+        }
+        return pieces
     }
 }

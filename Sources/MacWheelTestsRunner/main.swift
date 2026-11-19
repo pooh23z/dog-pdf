@@ -21,6 +21,7 @@ struct MacWheelTestsMain {
         registerTask5Tests(runner)
         registerTask6Tests(runner)
         registerTask7Tests(runner)
+        registerFinalFixTests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -509,5 +510,118 @@ func registerTask7Tests(_ runner: TestSuiteRunner) {
 
         try assertTrue(ModifierTrigger.control.matches(flags: [.control]))
         try assertTrue(!ModifierTrigger.control.matches(flags: [.command]))
+    }
+}
+
+
+private actor CountingTranslator: TextTranslating {
+    private(set) var callCount = 0
+    private(set) var maxItemLength = 0
+
+    func translate(_ texts: [String], to target: TranslationLanguage) async throws -> [String] {
+        callCount += 1
+        for item in texts {
+            maxItemLength = max(maxItemLength, item.count)
+        }
+        return texts.map { "[\(target.rawValue.uppercased())] \($0)" }
+    }
+}
+
+func registerFinalFixTests(_ runner: TestSuiteRunner) {
+    runner.test("FinalFix", "ImageEngine preserves full resolution on JPEG with embedded EXIF thumbnail") {
+        let dir = try makeTempDirectory("FinalFixEXIF")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let src = dir.appendingPathComponent("iphone_photo.jpg")
+        try TestFixtures.createJPEGWithSmallThumbnail(at: src, width: 1200, height: 800)
+
+        let engine = ImageEngine()
+        let tools = OutputPathResolver.discoverTools()
+        let pngOut = try await engine.convertImage(source: src, to: .toPNG, preset: .highQuality, toolPaths: tools)
+        let hqOut = try await engine.convertImage(source: src, to: .compress, preset: .highQuality, toolPaths: tools)
+
+        for out in [pngOut, hqOut] {
+            guard let imgSrc = CGImageSourceCreateWithURL(out as CFURL, nil),
+                  let cg = CGImageSourceCreateImageAtIndex(imgSrc, 0, nil) else {
+                throw TestFailure(message: "Unable to read output image \(out.lastPathComponent)")
+            }
+            try assertEqual(cg.width, 1200, "Width shrank to EXIF thumbnail for \(out.lastPathComponent)")
+            try assertEqual(cg.height, 800, "Height shrank to EXIF thumbnail for \(out.lastPathComponent)")
+        }
+    }
+
+    runner.test("FinalFix", "DragTriggerEvaluator rejects stale pasteboard and non-file drags") {
+        try assertTrue(!DragTriggerEvaluator.shouldSummonWheel(movedEnough: true, pasteboardChanged: false, hasFileURLs: true))
+        try assertTrue(!DragTriggerEvaluator.shouldSummonWheel(movedEnough: true, pasteboardChanged: true, hasFileURLs: false))
+        try assertTrue(!DragTriggerEvaluator.shouldSummonWheel(movedEnough: false, pasteboardChanged: true, hasFileURLs: true))
+        try assertTrue(DragTriggerEvaluator.shouldSummonWheel(movedEnough: true, pasteboardChanged: true, hasFileURLs: true))
+    }
+
+    runner.test("FinalFix", "PDFEngine preserves visual landscape orientation for /Rotate 90 pages") {
+        let dir = try makeTempDirectory("FinalFixRotate")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let pdfURL = dir.appendingPathComponent("rotated.pdf")
+        try TestFixtures.createRotatedPDF(at: pdfURL)
+
+        let engine = PDFEngine()
+        let pngOut = try await engine.exportPagesAsImages(pdfURL: pdfURL, format: .toPNG)
+        guard let src = CGImageSourceCreateWithURL(pngOut as CFURL, nil),
+              let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+            throw TestFailure(message: "Unable to read exported PNG")
+        }
+        try assertTrue(cg.width > cg.height, "Expected landscape width > height, got \(cg.width)x\(cg.height)")
+
+        let compressed = try await engine.compressPDF(pdfURL: pdfURL, preset: .balanced)
+        let outBounds = PDFDocument(url: compressed)?.page(at: 0)?.bounds(for: .mediaBox) ?? .zero
+        try assertTrue(outBounds.width > outBounds.height, "Expected compressed PDF page landscape, got \(outBounds.size)")
+    }
+
+    runner.test("FinalFix", "TranslationEngine handles BOM, spaced blank SRT lines, empty SRT error, and single-newline chunking") {
+        let dir = try makeTempDirectory("FinalFixTranslate")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let bomSRT = "\u{FEFF}1\n00:00:01,000 --> 00:00:02,000\nLine one\n   \n2\n00:00:03,000 --> 00:00:04,000\nLine two\n"
+        let cues = TranslationEngine.parseSRT(bomSRT)
+        try assertEqual(cues.count, 2)
+        try assertEqual(cues[0].index, "1")
+        try assertEqual(cues[1].index, "2")
+
+        let emptySRT = dir.appendingPathComponent("empty.srt")
+        try "not valid srt".write(to: emptySRT, atomically: true, encoding: .utf8)
+        let engine = TranslationEngine()
+        let tools = OutputPathResolver.discoverTools()
+        try await assertThrowsAsync(WheelError.invalidFile("No valid subtitle cues found in empty.srt.")) {
+            _ = try await engine.translateFile(source: emptySRT, to: .th, translator: MockTranslator(), toolPaths: tools)
+        }
+
+        // 4000-char single-newline document should split into chunks <= 1500 chars and call translator once per file
+        let longLines = (1...80).map { "Line number \($0) with some sample offline text for chunking." }.joined(separator: "\n")
+        let longTXT = dir.appendingPathComponent("long.txt")
+        try longLines.write(to: longTXT, atomically: true, encoding: .utf8)
+
+        let counter = CountingTranslator()
+        _ = try await engine.translateFile(source: longTXT, to: .th, translator: counter, toolPaths: tools)
+        let calls = await counter.callCount
+        let maxLen = await counter.maxItemLength
+        try assertEqual(calls, 1, "Expected 1 translator session call per file, got \(calls)")
+        try assertTrue(maxLen <= 1600, "Expected split chunks <= 1600 chars, got \(maxLen)")
+    }
+
+    runner.test("FinalFix", "DocumentEngine sanitizes remote URLs in HTML so conversion stays strictly offline") {
+        let dir = try makeTempDirectory("FinalFixHTML")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let html = "<html><head><link rel=\"stylesheet\" href=\"https://example.invalid/a.css\"></head><body><img src=\"https://example.invalid/pixel.png\"><p>Offline Safe Text</p></body></html>"
+        let htmlURL = dir.appendingPathComponent("page.html")
+        try html.write(to: htmlURL, atomically: true, encoding: .utf8)
+
+        let sanitized = DocumentEngine.sanitizeHTMLForOffline(html)
+        try assertTrue(!sanitized.contains("https://example.invalid"))
+        try assertTrue(sanitized.contains("Offline Safe Text"))
+
+        let txtOut = try await DocumentEngine().convertDocument(source: htmlURL, to: .toTXT, toolPaths: OutputPathResolver.discoverTools())
+        let text = try String(contentsOf: txtOut, encoding: .utf8)
+        try assertTrue(text.contains("Offline Safe Text"))
     }
 }

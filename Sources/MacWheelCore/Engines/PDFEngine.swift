@@ -95,13 +95,13 @@ public struct PDFEngine: Sendable {
 
         for idx in 0..<doc.pageCount {
             guard let page = doc.page(at: idx) else { continue }
-            let bounds = page.bounds(for: .mediaBox)
+            let visualBounds = page.bounds(for: .mediaBox).applying(page.transform(for: .mediaBox))
             let rendered = try renderPage(page, dpi: dpi)
             let jpegData = try encodeJPEGData(rendered, quality: quality)
             guard let nsImg = NSImage(data: jpegData) else {
                 throw WheelError.processFailed("Failed to re-encode PDF page \(idx + 1)")
             }
-            nsImg.size = bounds.size
+            nsImg.size = visualBounds.size
             if let compressedPage = PDFPage(image: nsImg) {
                 outDoc.insert(compressedPage, at: outDoc.pageCount)
             }
@@ -126,10 +126,11 @@ public struct PDFEngine: Sendable {
     }
 
     private func renderPage(_ page: PDFPage, dpi: CGFloat) throws -> CGImage {
-        let bounds = page.bounds(for: .mediaBox)
+        let rawBounds = page.bounds(for: .mediaBox)
+        let visualBounds = rawBounds.applying(page.transform(for: .mediaBox))
         let scale = dpi / 72.0
-        let width = max(1, Int((bounds.width * scale).rounded()))
-        let height = max(1, Int((bounds.height * scale).rounded()))
+        let width = max(1, Int((visualBounds.width * scale).rounded()))
+        let height = max(1, Int((visualBounds.height * scale).rounded()))
         let colorSpace = CGColorSpaceCreateDeviceRGB()
 
         guard let ctx = CGContext(
@@ -147,7 +148,7 @@ public struct PDFEngine: Sendable {
         ctx.setFillColor(CGColor.white)
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         ctx.scaleBy(x: scale, y: scale)
-        ctx.translateBy(x: -bounds.origin.x, y: -bounds.origin.y)
+        ctx.translateBy(x: -visualBounds.origin.x, y: -visualBounds.origin.y)
         page.draw(with: .mediaBox, to: ctx)
 
         guard let cgImage = ctx.makeImage() else {

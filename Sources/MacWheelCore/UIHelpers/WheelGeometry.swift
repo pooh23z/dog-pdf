@@ -64,3 +64,13 @@ public extension ModifierTrigger {
         }
     }
 }
+
+public struct DragTriggerEvaluator {
+    public static func shouldSummonWheel(
+        movedEnough: Bool,
+        pasteboardChanged: Bool,
+        hasFileURLs: Bool
+    ) -> Bool {
+        movedEnough && pasteboardChanged && hasFileURLs
+    }
+}

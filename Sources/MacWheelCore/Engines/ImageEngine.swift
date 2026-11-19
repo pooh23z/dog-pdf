@@ -179,7 +179,7 @@ public struct ImageEngine: Sendable {
             cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, thumbOpts as CFDictionary)
         } else {
             let opts: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true
             ]
             cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, opts as CFDictionary)

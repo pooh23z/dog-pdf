@@ -86,9 +86,15 @@ final class DragMonitor {
 
         case .leftMouseUp:
             dragStartLocation = nil
-            // Allow performDragOperation a brief moment before hiding if dropped outside
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                self?.wheelController.hide()
+            // If cursor is currently outside the wheel drop view, dismiss immediately;
+            // if inside, performDragOperation / draggingEnded will dismiss cleanly without racing.
+            if wheelController.isVisible && !wheelController.isDraggingInside {
+                wheelController.hide()
+            } else if wheelController.isVisible {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.wheelController.isVisible, !self.wheelController.isDraggingInside else { return }
+                    self.wheelController.hide()
+                }
             }
 
         default:
@@ -111,7 +117,11 @@ final class DragMonitor {
             movedEnough = true
         }
 
-        guard movedEnough && (pbChanged || !pbURLs.isEmpty) else { return }
+        guard DragTriggerEvaluator.shouldSummonWheel(
+            movedEnough: movedEnough,
+            pasteboardChanged: pbChanged,
+            hasFileURLs: !pbURLs.isEmpty
+        ) else { return }
         wheelController.show(centeredAt: currentPoint, preloadedURLs: pbURLs)
     }
 }

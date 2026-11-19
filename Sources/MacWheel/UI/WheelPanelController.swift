@@ -44,6 +44,7 @@ final class WheelPanelController {
     }
 
     var isVisible: Bool { isShowing }
+    var isDraggingInside: Bool { dropView.isDraggingInside }
 
     func show(centeredAt screenPoint: NSPoint, preloadedURLs: [URL] = []) {
         let size = panel.frame.size
@@ -89,6 +90,7 @@ private final class WheelDropView: NSView {
     private var draggedURLs: [URL] = []
     private var resolution = WheelResolution(categorySummary: "Drop Files", slices: [], hasSharedActions: false)
     private var hoveredTarget: WheelHitTarget = .cancel
+    private(set) var isDraggingInside: Bool = false
 
     var onExecute: (([URL], WheelAction) -> Void)?
     var onCancel: (() -> Void)?
@@ -107,6 +109,7 @@ private final class WheelDropView: NSView {
         draggedURLs = []
         resolution = WheelResolution(categorySummary: "Drop Here", slices: [], hasSharedActions: false)
         hoveredTarget = .cancel
+        isDraggingInside = false
         needsDisplay = true
     }
 
@@ -127,6 +130,7 @@ private final class WheelDropView: NSView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        isDraggingInside = true
         let urls = extractURLs(from: sender)
         if !urls.isEmpty {
             configure(urls: urls)
@@ -136,6 +140,7 @@ private final class WheelDropView: NSView {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        isDraggingInside = true
         updateHover(for: sender)
         if case .slice = hoveredTarget {
             return .copy
@@ -144,11 +149,18 @@ private final class WheelDropView: NSView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        isDraggingInside = false
         hoveredTarget = .cancel
         needsDisplay = true
     }
 
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        isDraggingInside = false
+        onCancel?()
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isDraggingInside = false
         let urls = extractURLs(from: sender)
         if !urls.isEmpty {
             configure(urls: urls)
