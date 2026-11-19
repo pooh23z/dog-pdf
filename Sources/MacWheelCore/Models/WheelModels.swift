@@ -118,19 +118,22 @@ public struct AppSettings: Sendable, Codable, Equatable {
     public var compressionPreset: CompressionPreset
     public var whisperLanguage: String
     public var showMainWindowOnLaunch: Bool
+    public var animateMenuBarDog: Bool
 
     public init(
         isEnabled: Bool = true,
         trigger: ModifierTrigger = .shift,
         compressionPreset: CompressionPreset = .balanced,
         whisperLanguage: String = "auto",
-        showMainWindowOnLaunch: Bool = true
+        showMainWindowOnLaunch: Bool = true,
+        animateMenuBarDog: Bool = true
     ) {
         self.isEnabled = isEnabled
         self.trigger = trigger
         self.compressionPreset = compressionPreset
         self.whisperLanguage = whisperLanguage
         self.showMainWindowOnLaunch = showMainWindowOnLaunch
+        self.animateMenuBarDog = animateMenuBarDog
     }
 
     enum CodingKeys: String, CodingKey {
@@ -139,6 +142,7 @@ public struct AppSettings: Sendable, Codable, Equatable {
         case compressionPreset
         case whisperLanguage
         case showMainWindowOnLaunch
+        case animateMenuBarDog
     }
 
     public init(from decoder: Decoder) throws {
@@ -148,6 +152,7 @@ public struct AppSettings: Sendable, Codable, Equatable {
         self.compressionPreset = try container.decodeIfPresent(CompressionPreset.self, forKey: .compressionPreset) ?? .balanced
         self.whisperLanguage = try container.decodeIfPresent(String.self, forKey: .whisperLanguage) ?? "auto"
         self.showMainWindowOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .showMainWindowOnLaunch) ?? true
+        self.animateMenuBarDog = try container.decodeIfPresent(Bool.self, forKey: .animateMenuBarDog) ?? true
     }
 }
 

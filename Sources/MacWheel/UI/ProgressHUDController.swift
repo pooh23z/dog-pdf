@@ -95,8 +95,7 @@ private struct HUDView: View {
         HStack(spacing: 10) {
             switch state {
             case .working:
-                ProgressView()
-                    .controlSize(.small)
+                AnimatedDogMascotView(isBusy: true, size: 32)
             case .success:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)

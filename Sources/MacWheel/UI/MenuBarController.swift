@@ -181,6 +181,8 @@ final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let state: AppState
+    private var animationController = DogAnimationController()
+    private var animationTimer: Timer?
 
     init(state: AppState, onOpenMainWindow: @escaping () -> Void) {
         self.state = state
@@ -189,17 +191,14 @@ final class MenuBarController: NSObject {
         super.init()
 
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: AppBranding.menuBarSymbolName, accessibilityDescription: AppBranding.displayName)
-                ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: AppBranding.displayName)
-            image?.isTemplate = true
-            button.image = image
+            button.imagePosition = .imageOnly
             button.toolTip = "\(AppBranding.displayName) (Offline File Converter)"
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
 
         popover.behavior = .applicationDefined
-        popover.contentSize = NSSize(width: 340, height: 540)
+        popover.contentSize = NSSize(width: 340, height: 560)
         popover.contentViewController = NSHostingController(
             rootView: AppControlView(
                 state: state,
@@ -213,6 +212,8 @@ final class MenuBarController: NSObject {
                 }
             )
         )
+
+        updateDogIconAndScheduleNext()
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
@@ -223,6 +224,35 @@ final class MenuBarController: NSObject {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    private func updateDogIconAndScheduleNext() {
+        animationTimer?.invalidate()
+        animationController.update(isBusy: state.isBusy, isEnabled: state.settings.isEnabled)
+        let pose = animationController.stepFrame()
+
+        if state.settings.animateMenuBarDog {
+            statusItem.button?.image = DogSpriteRenderer.menuBarImage(for: pose)
+        } else {
+            let staticPose = DogPose(
+                mode: state.settings.isEnabled ? .idle : .paused,
+                frameIndex: 0,
+                headBobY: 0,
+                tailAngleDeg: 10,
+                earBounceDeg: 0,
+                stridePhase: 0,
+                isBlinking: !state.settings.isEnabled,
+                showHeart: false
+            )
+            statusItem.button?.image = DogSpriteRenderer.menuBarImage(for: staticPose)
+        }
+
+        let interval = state.settings.animateMenuBarDog ? animationController.frameInterval : 0.6
+        animationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateDogIconAndScheduleNext()
+            }
         }
     }
 }
@@ -258,17 +288,7 @@ struct AppControlView: View {
 
     private var headerSection: some View {
         HStack {
-            if let appIcon = NSApp.applicationIconImage {
-                Image(nsImage: appIcon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 34, height: 34)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                Image(systemName: AppBranding.menuBarSymbolName)
-                    .font(.title2)
-                    .foregroundStyle(.orange)
-            }
+            AnimatedDogMascotView(isBusy: state.isBusy, size: 38)
             VStack(alignment: .leading, spacing: 1) {
                 Text(AppBranding.displayName)
                     .font(.headline)
@@ -413,6 +433,9 @@ struct AppControlView: View {
             }
 
             Toggle("เปิดหน้าต่างนี้เมื่อเริ่มแอป", isOn: $state.settings.showMainWindowOnLaunch)
+                .font(.caption.weight(.medium))
+
+            Toggle("น้องหมาดุ๊กดิ๊กบน Menu Bar", isOn: $state.settings.animateMenuBarDog)
                 .font(.caption.weight(.medium))
         }
     }

@@ -24,6 +24,7 @@ struct MacWheelTestsMain {
         registerFinalFixTests(runner)
         registerMainWindowTests(runner)
         registerBrandingTests(runner)
+        registerDogAnimationTests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -664,5 +665,39 @@ func registerBrandingTests(_ runner: TestSuiteRunner) {
         let normalized = DragPasteboardNormalizer.normalize([refURL, file])
         try assertEqual(normalized.count, 1)
         try assertEqual(normalized[0].pathExtension.lowercased(), "pdf")
+    }
+}
+
+
+func registerDogAnimationTests(_ runner: TestSuiteRunner) {
+    runner.test("DogAnimation", "AppSettings defaults animateMenuBarDog to true and preserves legacy JSON") {
+        try assertTrue(AppSettings().animateMenuBarDog)
+        let legacy = #"{"isEnabled":true,"trigger":"shift","compressionPreset":"balanced","whisperLanguage":"auto","showMainWindowOnLaunch":true}"#
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(legacy.utf8))
+        try assertTrue(decoded.animateMenuBarDog)
+    }
+
+    runner.test("DogAnimation", "DogAnimationController transitions idle -> working -> celebrating -> idle cleanly") {
+        var controller = DogAnimationController()
+        try assertEqual(controller.mode, .idle)
+        let firstInterval = controller.frameInterval
+        try assertTrue(firstInterval >= 0.18)
+
+        controller.update(isBusy: true, isEnabled: true)
+        try assertEqual(controller.mode, .working)
+        try assertTrue(controller.frameInterval < firstInterval)
+
+        let f0 = controller.stepFrame()
+        let f1 = controller.stepFrame()
+        try assertTrue(f0 != f1)
+
+        controller.update(isBusy: false, isEnabled: true)
+        try assertEqual(controller.mode, .celebrating)
+
+        // Advance past celebration ticks (~2s) -> returns to idle
+        for _ in 0..<25 {
+            _ = controller.stepFrame()
+        }
+        try assertEqual(controller.mode, .idle)
     }
 }
