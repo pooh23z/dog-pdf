@@ -28,6 +28,7 @@ public final class ProcessRunner: ProcessExecuting {
 
         let outPipe = Pipe()
         let errPipe = Pipe()
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = outPipe
         process.standardError = errPipe
 

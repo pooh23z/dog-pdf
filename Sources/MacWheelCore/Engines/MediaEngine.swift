@@ -98,7 +98,7 @@ public struct MediaEngine: Sendable {
             throw WheelError.unsupportedAction("Unsupported media action: \(action.label)")
         }
 
-        let result = try await runner.run(executableURL: ffmpeg, arguments: args)
+        let result = try await runner.run(executableURL: ffmpeg, arguments: ["-nostdin"] + args)
         guard result.exitCode == 0, FileManager.default.fileExists(atPath: dest.path) else {
             throw WheelError.processFailed("ffmpeg failed (\(result.exitCode)): \(result.stderr.suffix(400))")
         }
@@ -129,7 +129,7 @@ public struct MediaEngine: Sendable {
 
         let extractRes = try await runner.run(
             executableURL: ffmpeg,
-            arguments: ["-y", "-i", source.path, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", tempWav.path]
+            arguments: ["-nostdin", "-y", "-i", source.path, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", tempWav.path]
         )
         guard extractRes.exitCode == 0, FileManager.default.fileExists(atPath: tempWav.path) else {
             throw WheelError.processFailed("Audio extraction failed: \(extractRes.stderr.suffix(300))")
