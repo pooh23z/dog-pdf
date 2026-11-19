@@ -22,6 +22,7 @@ struct MacWheelTestsMain {
         registerTask6Tests(runner)
         registerTask7Tests(runner)
         registerFinalFixTests(runner)
+        registerMainWindowTests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -623,5 +624,22 @@ func registerFinalFixTests(_ runner: TestSuiteRunner) {
         let txtOut = try await DocumentEngine().convertDocument(source: htmlURL, to: .toTXT, toolPaths: OutputPathResolver.discoverTools())
         let text = try String(contentsOf: txtOut, encoding: .utf8)
         try assertTrue(text.contains("Offline Safe Text"))
+    }
+}
+
+
+func registerMainWindowTests(_ runner: TestSuiteRunner) {
+    runner.test("MainWindow", "AppSettings defaults showMainWindowOnLaunch to true and decodes legacy JSON safely") {
+        let defaults = AppSettings()
+        try assertTrue(defaults.showMainWindowOnLaunch)
+
+        let legacyJSON = #"{"isEnabled":true,"trigger":"shift","compressionPreset":"balanced","whisperLanguage":"auto"}"#
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(legacyJSON.utf8))
+        try assertTrue(decoded.showMainWindowOnLaunch)
+
+        let custom = AppSettings(showMainWindowOnLaunch: false)
+        let encoded = try JSONEncoder().encode(custom)
+        let decodedCustom = try JSONDecoder().decode(AppSettings.self, from: encoded)
+        try assertTrue(!decodedCustom.showMainWindowOnLaunch)
     }
 }

@@ -139,7 +139,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

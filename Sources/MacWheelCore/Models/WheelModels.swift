@@ -111,17 +111,37 @@ public struct AppSettings: Sendable, Codable, Equatable {
     public var trigger: ModifierTrigger
     public var compressionPreset: CompressionPreset
     public var whisperLanguage: String
+    public var showMainWindowOnLaunch: Bool
 
     public init(
         isEnabled: Bool = true,
         trigger: ModifierTrigger = .shift,
         compressionPreset: CompressionPreset = .balanced,
-        whisperLanguage: String = "auto"
+        whisperLanguage: String = "auto",
+        showMainWindowOnLaunch: Bool = true
     ) {
         self.isEnabled = isEnabled
         self.trigger = trigger
         self.compressionPreset = compressionPreset
         self.whisperLanguage = whisperLanguage
+        self.showMainWindowOnLaunch = showMainWindowOnLaunch
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case trigger
+        case compressionPreset
+        case whisperLanguage
+        case showMainWindowOnLaunch
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        self.trigger = try container.decodeIfPresent(ModifierTrigger.self, forKey: .trigger) ?? .shift
+        self.compressionPreset = try container.decodeIfPresent(CompressionPreset.self, forKey: .compressionPreset) ?? .balanced
+        self.whisperLanguage = try container.decodeIfPresent(String.self, forKey: .whisperLanguage) ?? "auto"
+        self.showMainWindowOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .showMainWindowOnLaunch) ?? true
     }
 }
 

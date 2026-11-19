@@ -54,6 +54,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "เลือกไฟล์"
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK, !panel.urls.isEmpty {
+            droppedURLs = panel.urls
+        }
+    }
+
     func runAction(urls: [URL], action: WheelAction) {
         guard !urls.isEmpty else { return }
         lastError = nil
@@ -148,7 +160,7 @@ final class MenuBarController: NSObject {
     private let popover: NSPopover
     private let state: AppState
 
-    init(state: AppState) {
+    init(state: AppState, onOpenMainWindow: @escaping () -> Void) {
         self.state = state
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
@@ -164,11 +176,19 @@ final class MenuBarController: NSObject {
         }
 
         popover.behavior = .applicationDefined
-        popover.contentSize = NSSize(width: 340, height: 520)
+        popover.contentSize = NSSize(width: 340, height: 540)
         popover.contentViewController = NSHostingController(
-            rootView: MenuBarPopoverView(state: state, onClose: { [weak self] in
-                self?.popover.performClose(nil)
-            })
+            rootView: AppControlView(
+                state: state,
+                isWindowMode: false,
+                onOpenMainWindow: { [weak self] in
+                    self?.popover.performClose(nil)
+                    onOpenMainWindow()
+                },
+                onClose: { [weak self] in
+                    self?.popover.performClose(nil)
+                }
+            )
         )
     }
 
@@ -184,9 +204,11 @@ final class MenuBarController: NSObject {
     }
 }
 
-private struct MenuBarPopoverView: View {
+struct AppControlView: View {
     @ObservedObject var state: AppState
-    let onClose: () -> Void
+    let isWindowMode: Bool
+    let onOpenMainWindow: (() -> Void)?
+    let onClose: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -205,9 +227,9 @@ private struct MenuBarPopoverView: View {
                 Divider()
                 footerSection
             }
-            .padding(14)
+            .padding(isWindowMode ? 18 : 14)
         }
-        .frame(width: 340)
+        .frame(minWidth: isWindowMode ? 380 : 340, maxWidth: isWindowMode ? .infinity : 340)
         .onAppear { state.refreshStatus() }
     }
 
@@ -224,40 +246,58 @@ private struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if !isWindowMode, let onOpenMainWindow {
+                Button {
+                    onOpenMainWindow()
+                } label: {
+                    Image(systemName: "macwindow")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("เปิดหน้าต่างแอปเต็ม")
+            }
             Toggle("", isOn: $state.settings.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+            if let onClose {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("ปิดหน้าต่าง")
             }
-            .buttonStyle(.plain)
-            .help("ปิดหน้าต่าง")
         }
     }
 
     private var dropZoneSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
                         state.isDropTargeted ? Color.orange : Color.secondary.opacity(0.35),
                         style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
                     )
                     .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(state.isDropTargeted ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.06))
                     )
-                    .frame(height: 64)
+                    .frame(height: isWindowMode ? 96 : 68)
 
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     Image(systemName: "arrow.down.doc.fill")
+                        .font(isWindowMode ? .title2 : .body)
                         .foregroundStyle(.orange)
-                    Text(state.droppedURLs.isEmpty ? "ลากไฟล์มาวางที่นี่ก็ได้ (Drop Zone)" : "เลือกไว้ \(state.droppedURLs.count) ไฟล์ — เลือกคำสั่งด้านล่าง")
+                    Text(state.droppedURLs.isEmpty ? "ลากไฟล์มาวางที่นี่ (Drop Zone)" : "เลือกไว้ \(state.droppedURLs.count) ไฟล์ — กดเลือกคำสั่งด้านล่าง")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button("เลือกไฟล์จาก Finder…") {
+                        state.pickFiles()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
                 }
             }
             .onDrop(of: [.fileURL], isTargeted: $state.isDropTargeted) { providers in
@@ -339,6 +379,9 @@ private struct MenuBarPopoverView: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
+
+            Toggle("เปิดหน้าต่างนี้เมื่อเริ่มแอป", isOn: $state.settings.showMainWindowOnLaunch)
+                .font(.caption.weight(.medium))
         }
     }
 
