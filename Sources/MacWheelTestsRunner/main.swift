@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MacWheelCore
 import PDFKit
@@ -19,6 +20,7 @@ struct MacWheelTestsMain {
         registerTask4Tests(runner)
         registerTask5Tests(runner)
         registerTask6Tests(runner)
+        registerTask7Tests(runner)
 
         let code = await runner.run(filter: filter)
         exit(code)
@@ -451,5 +453,61 @@ func registerTask6Tests(_ runner: TestSuiteRunner) {
         let batchResult = try await executor.execute(urls: [t1, t2], action: .toHTML, settings: AppSettings()) { _ in }
         try assertEqual(batchResult.outputURLs.count, 2)
         try assertTrue(batchResult.outputURLs.allSatisfy { $0.pathExtension.lowercased() == "html" })
+    }
+}
+
+
+func registerTask7Tests(_ runner: TestSuiteRunner) {
+    runner.test("Task7", "WheelGeometry returns cancel inside inner hub or outside ring") {
+        let center = CGPoint(x: 130, y: 130)
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 130, y: 130), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 6),
+            .cancel
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 150, y: 130), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 6),
+            .cancel
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 260, y: 130), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 6),
+            .cancel
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 130, y: 200), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 0),
+            .cancel
+        )
+    }
+
+    runner.test("Task7", "WheelGeometry maps top/clockwise ring points in AppKit coordinates to slices") {
+        let center = CGPoint(x: 130, y: 130)
+        // AppKit coordinates: +y is UP (top = slice 0), +x is RIGHT (3 o'clock = slice 1 for 4 slices), -y is DOWN (6 o'clock = slice 2), -x is LEFT (9 o'clock = slice 3).
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 130, y: 210), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 4),
+            .slice(0)
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 210, y: 130), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 4),
+            .slice(1)
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 130, y: 50), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 4),
+            .slice(2)
+        )
+        try assertEqual(
+            WheelGeometry.hitTest(point: CGPoint(x: 50, y: 130), center: center, innerRadius: 42, outerRadius: 126, sliceCount: 4),
+            .slice(3)
+        )
+    }
+
+    runner.test("Task7", "ModifierTrigger matches only the configured modifier flag") {
+        try assertTrue(ModifierTrigger.shift.matches(flags: [.shift]))
+        try assertTrue(!ModifierTrigger.shift.matches(flags: []))
+        try assertTrue(!ModifierTrigger.shift.matches(flags: [.option]))
+
+        try assertTrue(ModifierTrigger.option.matches(flags: [.option]))
+        try assertTrue(!ModifierTrigger.option.matches(flags: [.shift]))
+
+        try assertTrue(ModifierTrigger.control.matches(flags: [.control]))
+        try assertTrue(!ModifierTrigger.control.matches(flags: [.command]))
     }
 }
