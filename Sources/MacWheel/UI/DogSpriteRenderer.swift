@@ -3,42 +3,70 @@ import MacWheelCore
 import SwiftUI
 
 enum DogSpriteRenderer {
-    /// Renders a crisp 28x18pt template NSImage for the macOS Menu Bar for any of the 10 animals.
+    /// Renders a crisp 42x18pt template NSImage for the macOS Menu Bar where the animal walks & sprints across the runway.
     static func menuBarImage(for pose: DogPose, character: MascotCharacter = .shiba) -> NSImage {
-        let size = NSSize(width: 28, height: 18)
+        let size = NSSize(width: 42, height: 18)
         let image = NSImage(size: size, flipped: false) { _ in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
             ctx.saveGState()
 
-            let bob = min(pose.headBobY * 0.55, 1.4)
-            let baseY: CGFloat = 1.0 + bob
             let ink = NSColor.black
+            ink.setFill()
+            ink.setStroke()
+
+            if pose.mode == .working {
+                let phaseShift = CGFloat(pose.frameIndex) * 2.0
+                for i in 0..<5 {
+                    let dotX = CGFloat(5 + i * 8) - (pose.facingRight ? phaseShift : -phaseShift)
+                    if dotX > 3 && dotX < 39 {
+                        NSBezierPath(ovalIn: NSRect(x: dotX, y: 0.4, width: 1.5, height: 0.9)).fill()
+                    }
+                }
+            }
+
+            let centerX: CGFloat = 21.0 + pose.xOffset
+            let bob = min(pose.headBobY * 0.72, 2.5)
+            let baseY: CGFloat = 1.0 + bob
+
+            if pose.mode == .working {
+                drawRunningDust(ctx: ctx, centerX: centerX, baseY: baseY, facingRight: pose.facingRight, dustPhase: pose.dustPhase, ink: ink)
+            }
+
+            ctx.saveGState()
+            ctx.translateBy(x: centerX, y: baseY + 6.5)
+            if !pose.facingRight {
+                ctx.scaleBy(x: -1.0, y: 1.0)
+            }
+            ctx.rotate(by: pose.bodyTiltDeg * .pi / 180.0)
+            ctx.translateBy(x: -14.0, y: -6.5)
 
             switch character {
             case .shiba:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .shiba)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .shiba)
             case .cat:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .cat)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .cat)
             case .rabbit:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .rabbit)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .rabbit)
             case .bear:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .bear)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .bear)
             case .panda:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .panda)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .panda)
             case .fox:
-                drawQuadruped(ctx: ctx, baseY: baseY, pose: pose, ink: ink, style: .fox)
+                drawQuadruped(ctx: ctx, baseY: 0, pose: pose, ink: ink, style: .fox)
             case .penguin:
-                drawPenguin(ctx: ctx, baseY: baseY, pose: pose, ink: ink)
+                drawPenguin(ctx: ctx, baseY: 0, pose: pose, ink: ink)
             case .duck:
-                drawDuck(ctx: ctx, baseY: baseY, pose: pose, ink: ink)
+                drawDuck(ctx: ctx, baseY: 0, pose: pose, ink: ink)
             case .frog:
-                drawFrog(ctx: ctx, baseY: baseY, pose: pose, ink: ink)
+                drawFrog(ctx: ctx, baseY: 0, pose: pose, ink: ink)
             case .owl:
-                drawOwl(ctx: ctx, baseY: baseY, pose: pose, ink: ink)
+                drawOwl(ctx: ctx, baseY: 0, pose: pose, ink: ink)
             }
+            ctx.restoreGState()
 
             if pose.showHeart {
-                drawHeart(x: 24.4, y: baseY + 10.2, ink: ink)
+                let hx = pose.facingRight ? min(38.5, centerX + 9.0) : max(3.5, centerX - 11.0)
+                drawHeart(x: hx, y: min(14.5, baseY + 10.2), ink: ink)
             }
 
             ctx.restoreGState()
@@ -46,6 +74,51 @@ enum DogSpriteRenderer {
         }
         image.isTemplate = true
         return image
+    }
+
+    private static func drawRunningDust(
+        ctx: CGContext,
+        centerX: CGFloat,
+        baseY: CGFloat,
+        facingRight: Bool,
+        dustPhase: CGFloat,
+        ink: NSColor
+    ) {
+        let dir: CGFloat = facingRight ? -1.0 : 1.0
+        let startX = centerX + dir * 8.5
+        let p1 = dustPhase
+        let p2 = (dustPhase + 0.5).truncatingRemainder(dividingBy: 1.0)
+        ink.setFill()
+        for p in [p1, p2] {
+            let dist = dir * (2.0 + p * 6.5)
+            let radius = max(0.8, (1.0 - p) * 2.2)
+            let y = baseY + 0.6 + p * 2.4
+            let x = startX + dist
+            if x >= 1.5 && x <= 40.5 {
+                NSBezierPath(ovalIn: NSRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)).fill()
+            }
+        }
+    }
+
+    private static func drawPivotedLeg(
+        ctx: CGContext,
+        jointX: CGFloat,
+        jointY: CGFloat,
+        angleDeg: CGFloat,
+        width: CGFloat,
+        length: CGFloat,
+        ink: NSColor
+    ) {
+        ctx.saveGState()
+        ctx.translateBy(x: jointX, y: jointY)
+        ctx.rotate(by: angleDeg * .pi / 180.0)
+        ink.setFill()
+        NSBezierPath(
+            roundedRect: NSRect(x: -width / 2, y: -length + 0.6, width: width, height: length),
+            xRadius: width / 2,
+            yRadius: width / 2
+        ).fill()
+        ctx.restoreGState()
     }
 
     private enum QuadrupedStyle { case shiba, cat, rabbit, bear, panda, fox }
@@ -91,23 +164,22 @@ enum DogSpriteRenderer {
         }
         ctx.restoreGState()
 
-        // 2. Body
+        // 2. Body & 3. Pivoted Galloping Legs
+        let strideDeg = pose.stridePhase * 42.0
+        if style == .rabbit {
+            drawPivotedLeg(ctx: ctx, jointX: 7.8, jointY: baseY + 4.1, angleDeg: -strideDeg * 1.15, width: 2.8, length: 4.3, ink: ink)
+            drawPivotedLeg(ctx: ctx, jointX: 14.4, jointY: baseY + 4.1, angleDeg: strideDeg * 1.15, width: 2.1, length: 4.3, ink: ink)
+        } else {
+            drawPivotedLeg(ctx: ctx, jointX: 7.4, jointY: baseY + 4.2, angleDeg: -strideDeg, width: 2.0, length: 4.4, ink: ink)
+            drawPivotedLeg(ctx: ctx, jointX: 9.5, jointY: baseY + 4.2, angleDeg: strideDeg * 0.65, width: 1.9, length: 4.2, ink: ink)
+            drawPivotedLeg(ctx: ctx, jointX: 12.7, jointY: baseY + 4.2, angleDeg: -strideDeg * 0.65, width: 1.9, length: 4.2, ink: ink)
+            drawPivotedLeg(ctx: ctx, jointX: 14.8, jointY: baseY + 4.2, angleDeg: strideDeg, width: 2.0, length: 4.4, ink: ink)
+        }
+
         let bodyH: CGFloat = (style == .bear || style == .panda) ? 6.6 : 5.8
         let bodyRect = NSRect(x: 5.8, y: baseY + 2.9, width: 10.6, height: bodyH)
         ink.setFill()
         NSBezierPath(roundedRect: bodyRect, xRadius: bodyH / 2.0, yRadius: bodyH / 2.0).fill()
-
-        // 3. Legs
-        let swing = pose.stridePhase * (style == .rabbit ? 2.4 : 1.9)
-        if style == .rabbit {
-            drawLeg(x: 6.5 - swing * 0.6, y: baseY + max(0, -swing * 0.4), width: 3.0, height: 4.2, ink: ink)
-            drawLeg(x: 13.6 + swing * 0.6, y: baseY + max(0, swing * 0.5), width: 2.2, height: 4.4, ink: ink)
-        } else {
-            drawLeg(x: 6.5 - swing * 0.65, y: baseY + max(0, -swing * 0.35), width: 2.1, height: 4.5, ink: ink)
-            drawLeg(x: 8.8 + swing * 0.45, y: baseY + max(0, swing * 0.25), width: 2.1, height: 4.4, ink: ink)
-            drawLeg(x: 12.1 - swing * 0.45, y: baseY + max(0, -swing * 0.25), width: 2.1, height: 4.4, ink: ink)
-            drawLeg(x: 14.1 + swing * 0.65, y: baseY + max(0, swing * 0.40), width: 2.1, height: 4.5, ink: ink)
-        }
 
         // 4. Head
         let headCenter = NSPoint(x: 16.2, y: baseY + 8.3)
@@ -659,5 +731,71 @@ struct AnimatedDogMascotView: View {
         smile.addQuadCurve(to: CGPoint(x: 0, y: y - 0.8), control: CGPoint(x: -1.3, y: y + 1.0))
         smile.addQuadCurve(to: CGPoint(x: 2.6, y: y), control: CGPoint(x: 1.3, y: y + 1.0))
         ctx.stroke(smile, with: .color(Color(white: 0.2)), style: StrokeStyle(lineWidth: 1.1, lineCap: .round))
+    }
+}
+
+/// Interactive Tab-Bar Pet Runway strip inside Dog PDF's window!
+struct DogTabBarRunwayView: View {
+    let character: MascotCharacter
+    let activeTabIndex: Int
+    let tabCount: Int
+    let isRunningFast: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            GeometryReader { geo in
+                let trackW = max(60.0, geo.size.width - 36.0)
+                let tabCenterRatio = (Double(activeTabIndex) + 0.5) / Double(max(1, tabCount))
+                let patrolWave = sin(t * (isRunningFast ? 2.4 : 1.15))
+                let facingRight = cos(t * (isRunningFast ? 2.4 : 1.15)) >= 0
+                let normalizedX: Double = isRunningFast
+                    ? (0.5 + patrolWave * 0.45)
+                    : min(0.95, max(0.05, tabCenterRatio + patrolWave * 0.08))
+                let xPos = 18.0 + trackW * normalizedX
+                let stridePhase = CGFloat(sin(t * (isRunningFast ? 18.0 : 8.5)) * (isRunningFast ? 1.0 : 0.55))
+                let bounceY = CGFloat(abs(sin(t * (isRunningFast ? 18.0 : 8.5))) * (isRunningFast ? 2.4 : 1.1))
+                let tiltDeg = CGFloat(cos(t * (isRunningFast ? 18.0 : 8.5)) * (isRunningFast ? 8.5 : 3.0))
+                let wagDeg = CGFloat(sin(t * (isRunningFast ? 22.0 : 10.0)) * (isRunningFast ? 32.0 : 20.0))
+                let isBlinking = !isRunningFast && (t.truncatingRemainder(dividingBy: 4.2) > 4.02)
+
+                let pose = DogPose(
+                    mode: isRunningFast ? .working : .idle,
+                    frameIndex: Int(t * 12) % 6,
+                    headBobY: bounceY,
+                    tailAngleDeg: wagDeg,
+                    earBounceDeg: -tiltDeg * 1.4,
+                    stridePhase: stridePhase,
+                    isBlinking: isBlinking,
+                    showHeart: false,
+                    xOffset: 0,
+                    facingRight: facingRight,
+                    bodyTiltDeg: tiltDeg,
+                    dustPhase: CGFloat((t * 2.5).truncatingRemainder(dividingBy: 1.0))
+                )
+                let sprite = DogSpriteRenderer.menuBarImage(for: pose, character: character)
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.orange.opacity(0.09))
+                        .frame(height: 22)
+
+                    HStack(spacing: 14) {
+                        ForEach(0..<16, id: \.self) { _ in
+                            Circle()
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(width: 2.5, height: 2.5)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Image(nsImage: sprite)
+                        .renderingMode(.template)
+                        .foregroundStyle(isRunningFast ? Color.orange : Color.primary.opacity(0.82))
+                        .position(x: xPos, y: 11)
+                }
+            }
+        }
+        .frame(height: 22)
     }
 }

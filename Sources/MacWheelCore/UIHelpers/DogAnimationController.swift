@@ -16,6 +16,10 @@ public struct DogPose: Equatable, Sendable {
     public let stridePhase: CGFloat
     public let isBlinking: Bool
     public let showHeart: Bool
+    public let xOffset: CGFloat
+    public let facingRight: Bool
+    public let bodyTiltDeg: CGFloat
+    public let dustPhase: CGFloat
 
     public init(
         mode: DogAnimationMode,
@@ -25,7 +29,11 @@ public struct DogPose: Equatable, Sendable {
         earBounceDeg: CGFloat,
         stridePhase: CGFloat,
         isBlinking: Bool,
-        showHeart: Bool
+        showHeart: Bool,
+        xOffset: CGFloat = 0,
+        facingRight: Bool = true,
+        bodyTiltDeg: CGFloat = 0,
+        dustPhase: CGFloat = 0
     ) {
         self.mode = mode
         self.frameIndex = frameIndex
@@ -35,6 +43,10 @@ public struct DogPose: Equatable, Sendable {
         self.stridePhase = stridePhase
         self.isBlinking = isBlinking
         self.showHeart = showHeart
+        self.xOffset = xOffset
+        self.facingRight = facingRight
+        self.bodyTiltDeg = bodyTiltDeg
+        self.dustPhase = dustPhase
     }
 }
 
@@ -43,14 +55,17 @@ public struct DogAnimationController: Sendable {
     private var tick: Int = 0
     private var celebrationRemainingTicks: Int = 0
     private var wasBusy: Bool = false
+    private var xPos: CGFloat = 0
+    private var direction: CGFloat = 1.0
+    private var pauseTicksRemaining: Int = 0
 
     public init() {}
 
     public var frameInterval: TimeInterval {
         switch mode {
-        case .idle: return 0.22
-        case .working: return 0.10
-        case .celebrating: return 0.13
+        case .idle: return 0.18
+        case .working: return 0.068
+        case .celebrating: return 0.085
         case .paused: return 0.50
         }
     }
@@ -66,9 +81,10 @@ public struct DogAnimationController: Sendable {
         if isBusy {
             mode = .working
             celebrationRemainingTicks = 0
+            pauseTicksRemaining = 0
         } else if wasBusy {
             mode = .celebrating
-            celebrationRemainingTicks = 15
+            celebrationRemainingTicks = 20
             tick = 0
         } else if mode == .paused {
             mode = .idle
@@ -79,6 +95,7 @@ public struct DogAnimationController: Sendable {
     @discardableResult
     public mutating func stepFrame() -> DogPose {
         tick += 1
+        let t = Double(tick)
 
         switch mode {
         case .paused:
@@ -90,24 +107,44 @@ public struct DogAnimationController: Sendable {
                 earBounceDeg: -6,
                 stridePhase: 0,
                 isBlinking: true,
-                showHeart: false
+                showHeart: false,
+                xOffset: 0,
+                facingRight: true,
+                bodyTiltDeg: 0,
+                dustPhase: 0
             )
 
         case .working:
-            let idx = tick % 6
-            let strideMap: [CGFloat] = [-1.0, -0.4, 0.35, 1.0, 0.4, -0.35]
-            let bobMap: [CGFloat] = [0.0, 0.8, 1.5, 0.6, 0.0, 1.1]
-            let tailMap: [CGFloat] = [18, 28, 36, 22, 12, 26]
-            let earMap: [CGFloat] = [-8, 6, 14, 4, -10, 8]
+            let maxRunway: CGFloat = 7.5
+            xPos += direction * 1.4
+            if xPos >= maxRunway {
+                xPos = maxRunway
+                direction = -1.0
+            } else if xPos <= -maxRunway {
+                xPos = -maxRunway
+                direction = 1.0
+            }
+            let runCycle = t * 1.15
+            let stride = CGFloat(sin(runCycle))
+            let bob = CGFloat(abs(sin(runCycle)) * 2.2)
+            let tilt = CGFloat(cos(runCycle) * 8.5)
+            let tail = CGFloat(22.0 + sin(runCycle * 1.3) * 26.0)
+            let ear = CGFloat(-cos(runCycle) * 16.0)
+            let dust = CGFloat((t * 0.28).truncatingRemainder(dividingBy: 1.0))
+
             return DogPose(
                 mode: .working,
-                frameIndex: idx,
-                headBobY: bobMap[idx],
-                tailAngleDeg: tailMap[idx],
-                earBounceDeg: earMap[idx],
-                stridePhase: strideMap[idx],
+                frameIndex: tick % 6,
+                headBobY: bob,
+                tailAngleDeg: tail,
+                earBounceDeg: ear,
+                stridePhase: stride,
                 isBlinking: false,
-                showHeart: false
+                showHeart: false,
+                xOffset: xPos,
+                facingRight: direction > 0,
+                bodyTiltDeg: tilt,
+                dustPhase: dust
             )
 
         case .celebrating:
@@ -116,10 +153,10 @@ public struct DogAnimationController: Sendable {
             } else {
                 mode = .idle
                 tick = 0
-                return currentIdlePose(frame: 0)
+                return stepIdleFrame()
             }
             let idx = tick % 4
-            let jumpMap: [CGFloat] = [0.0, 2.2, 2.8, 1.0]
+            let jumpMap: [CGFloat] = [0.0, 2.3, 2.9, 1.1]
             let tailMap: [CGFloat] = [-25, 35, -28, 38]
             let earMap: [CGFloat] = [6, 16, 12, -4]
             return DogPose(
@@ -128,29 +165,62 @@ public struct DogAnimationController: Sendable {
                 headBobY: jumpMap[idx],
                 tailAngleDeg: tailMap[idx],
                 earBounceDeg: earMap[idx],
-                stridePhase: 0.45,
+                stridePhase: idx % 2 == 0 ? 0.65 : -0.65,
                 isBlinking: false,
-                showHeart: idx == 1 || idx == 2
+                showHeart: idx == 1 || idx == 2,
+                xOffset: xPos,
+                facingRight: direction > 0,
+                bodyTiltDeg: idx % 2 == 0 ? 6.0 : -6.0,
+                dustPhase: 0.5
             )
 
         case .idle:
-            return currentIdlePose(frame: tick % 12)
+            return stepIdleFrame()
         }
     }
 
-    private func currentIdlePose(frame idx: Int) -> DogPose {
-        let bobMap: [CGFloat] = [0.0, 0.4, 0.7, 0.4, 0.0, 0.3, 0.6, 0.3, 0.0, 0.4, 0.6, 0.2]
-        let tailMap: [CGFloat] = [-20, -4, 18, 32, 16, -6, -22, -4, 18, 32, 14, -8]
-        let earMap: [CGFloat] = [0, 3, 6, 3, 0, -2, 0, 4, 7, 3, 0, -2]
+    private mutating func stepIdleFrame() -> DogPose {
+        let maxRunway: CGFloat = 6.2
+        let isPaused: Bool
+        if pauseTicksRemaining > 0 {
+            pauseTicksRemaining -= 1
+            isPaused = true
+        } else {
+            isPaused = false
+            xPos += direction * 0.65
+            if xPos >= maxRunway {
+                xPos = maxRunway
+                direction = -1.0
+                pauseTicksRemaining = 7
+            } else if xPos <= -maxRunway {
+                xPos = -maxRunway
+                direction = 1.0
+                pauseTicksRemaining = 7
+            }
+        }
+
+        let t = Double(tick)
+        let walkCycle = t * 0.85
+        let stride = isPaused ? 0 : CGFloat(sin(walkCycle) * 0.55)
+        let bob = isPaused ? CGFloat(abs(sin(t * 0.4)) * 0.45) : CGFloat(abs(sin(walkCycle)) * 1.1)
+        let tilt = isPaused ? CGFloat(sin(t * 0.35) * 1.6) : CGFloat(cos(walkCycle) * 3.0)
+        let tail = CGFloat(sin(t * 0.75) * 24.0)
+        let ear = CGFloat(sin(walkCycle + 0.5) * (isPaused ? 4.0 : 9.0))
+        let facingRight = pauseTicksRemaining > 0 ? (xPos < 0) : (direction > 0)
+
         return DogPose(
             mode: .idle,
-            frameIndex: idx,
-            headBobY: bobMap[idx],
-            tailAngleDeg: tailMap[idx],
-            earBounceDeg: earMap[idx],
-            stridePhase: 0,
-            isBlinking: idx == 10,
-            showHeart: false
+            frameIndex: tick % 12,
+            headBobY: bob,
+            tailAngleDeg: tail,
+            earBounceDeg: ear,
+            stridePhase: stride,
+            isBlinking: (tick % 16 == 10),
+            showHeart: false,
+            xOffset: xPos,
+            facingRight: facingRight,
+            bodyTiltDeg: tilt,
+            dustPhase: 0
         )
     }
 }

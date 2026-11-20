@@ -381,27 +381,36 @@ struct AppControlView: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 6) {
-            ForEach(AppTab.allCases) { tab in
-                let isSelected = (state.selectedTab == tab)
-                Button {
-                    state.selectedTab = tab
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(tab.title)
-                            .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+        VStack(spacing: 5) {
+            DogTabBarRunwayView(
+                character: state.settings.mascot,
+                activeTabIndex: AppTab.allCases.firstIndex(of: state.selectedTab) ?? 0,
+                tabCount: AppTab.allCases.count,
+                isRunningFast: state.isBusy || state.previewRunning
+            )
+
+            HStack(spacing: 6) {
+                ForEach(AppTab.allCases) { tab in
+                    let isSelected = (state.selectedTab == tab)
+                    Button {
+                        state.selectedTab = tab
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(tab.title)
+                                .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(isSelected ? Color.orange : Color.secondary.opacity(0.10))
+                        )
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(isSelected ? Color.orange : Color.secondary.opacity(0.10))
-                    )
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, isWindowMode ? 18 : 14)
